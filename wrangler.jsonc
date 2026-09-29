@@ -1,0 +1,29 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "event-watch",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-30",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "event-watch",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
+  "vars": {
+    "APP_NAME": "Event Watch",
+    "APP_ORIGIN": "https://REPLACE_WITH_YOUR_WORKERS_DEV_DOMAIN.workers.dev",
+    "NOTIFICATION_FROM": "Event Watch <notifications@REPLACE_WITH_YOUR_VERIFIED_DOMAIN>",
+    "CHECK_BATCH_SIZE": "50",
+    "CHECK_CONCURRENCY": "5"
+  }
+}

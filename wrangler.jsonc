@@ -12,7 +12,7 @@
     {
       "binding": "DB",
       "database_name": "event-watch",
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "database_id": "1f1e9ee3-ad99-4bd1-bf40-ac3ce1b37dc9",
       "migrations_dir": "migrations"
     }
   ],
@@ -21,9 +21,9 @@
   },
   "vars": {
     "APP_NAME": "Event Watch",
-    "APP_ORIGIN": "https://REPLACE_WITH_YOUR_WORKERS_DEV_DOMAIN.workers.dev",
+    "APP_ORIGIN": "https://event-watch.uncover250.workers.dev",
     "GMAIL_FROM_NAME": "Event Watch",
-    "GMAIL_SENDER_EMAIL": "REPLACE_WITH_YOUR_GMAIL_ADDRESS",
+    "GMAIL_SENDER_EMAIL": "UnCover250@gmail.com",
     "CHECK_BATCH_SIZE": "50",
     "CHECK_CONCURRENCY": "5"
   }

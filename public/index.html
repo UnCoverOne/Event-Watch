@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="theme-color" content="#0b0b0c" />
+  <title>Event Watch</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Event Watch home">Event Watch<span class="dot">.</span></a>
+      <button id="logoutButton" class="link-button hidden" type="button">Sign out</button>
+    </header>
+
+    <section id="authView" class="auth-grid">
+      <div class="hero">
+        <p class="eyebrow">Event availability alerts</p>
+        <h1>Stop refreshing.<br />Catch the opening.</h1>
+        <p class="lede">Watch event pages across the web and get an email when registration, booking, or tickets appear to become available.</p>
+      </div>
+
+      <div class="panel auth-panel">
+        <div class="tabs" role="tablist">
+          <button id="loginTab" class="tab active" type="button">Sign in</button>
+          <button id="registerTab" class="tab" type="button">Create account</button>
+        </div>
+
+        <form id="authForm" class="stack">
+          <label>
+            <span>Email</span>
+            <input id="emailInput" type="email" autocomplete="email" required placeholder="you@example.com" />
+          </label>
+          <label>
+            <span>Password</span>
+            <input id="passwordInput" type="password" autocomplete="current-password" required minlength="12" placeholder="12+ characters" />
+          </label>
+          <button id="authSubmit" class="primary" type="submit">Sign in</button>
+          <p id="authHint" class="hint">New accounts use a 12+ character password.</p>
+          <p id="authError" class="error" aria-live="polite"></p>
+        </form>
+      </div>
+    </section>
+
+    <section id="dashboardView" class="hidden">
+      <div class="dashboard-head">
+        <div>
+          <p class="eyebrow">Event watchlist</p>
+          <h1>Your watches</h1>
+          <p id="accountLine" class="muted"></p>
+        </div>
+        <div id="verificationBox" class="verification hidden">
+          <span>Verify your email to receive alerts.</span>
+          <button id="resendVerification" class="small-button" type="button">Send verification</button>
+        </div>
+      </div>
+
+      <form id="addForm" class="add-form panel">
+        <label for="eventUrl">Event page URL</label>
+        <div class="input-row">
+          <input id="eventUrl" type="url" required placeholder="https://example.com/events/your-event" />
+          <button class="primary" type="submit">Watch event</button>
+        </div>
+        <p id="addError" class="error" aria-live="polite"></p>
+      </form>
+
+      <div class="section-line">
+        <span id="eventCount">0 events</span>
+        <button id="refreshButton" class="link-button" type="button">Refresh</button>
+      </div>
+      <div id="events" class="event-list"></div>
+      <div id="emptyState" class="empty panel hidden">
+        <p>No watched events yet.</p>
+        <span>Paste an HTTPS event page URL above to start monitoring it.</span>
+      </div>
+    </section>
+
+    <footer>
+      <span>Checks run every 5 minutes.</span>
+      <span>Independent availability monitor; always confirm on the source event page.</span>
+    </footer>
+  </main>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

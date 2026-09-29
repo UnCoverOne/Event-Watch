@@ -1,5 +1,5 @@
 import { HttpError, hashPassword, isValidEmail, normalizeEmail, nowIso, randomToken, sha256, uuid, verifyPassword } from './utils.js';
-import { sendVerificationEmail } from './email.js';
+import { isGmailConfigured, sendVerificationEmail } from './email.js';
 
 const SESSION_COOKIE = 'eventwatch_session';
 const SESSION_DAYS = 30;
@@ -25,7 +25,7 @@ export async function register(request, env) {
 
   const { cookie } = await createSession(env, userId);
   let verificationSent = false;
-  if (env.RESEND_API_KEY) {
+  if (isGmailConfigured(env)) {
     try {
       await issueVerification(env, { id: userId, email }, new URL(request.url).origin);
       verificationSent = true;
@@ -112,7 +112,7 @@ export function assertSameOrigin(request) {
 }
 
 export async function issueVerification(env, user, requestOrigin = null) {
-  if (!env.RESEND_API_KEY) throw new HttpError(503, 'Email delivery is not configured.', 'email_not_configured');
+  if (!isGmailConfigured(env)) throw new HttpError(503, 'Email delivery is not configured.', 'email_not_configured');
   await env.DB.prepare('DELETE FROM email_verifications WHERE user_id = ? AND used_at IS NULL').bind(user.id).run();
   const token = randomToken(32);
   const tokenHash = await sha256(token);

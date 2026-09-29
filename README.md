@@ -13,7 +13,7 @@ Event Watch is **not tied to one event platform**. Users can paste any public HT
 - Cloudflare Workers — API, authentication, scheduled checking, and static asset routing
 - Cloudflare D1 — users, sessions, events, subscriptions, and notification history
 - Cloudflare Cron Triggers — checks watched events every five minutes
-- Resend — verification and availability emails
+- Gmail API — verification and availability emails sent from your Gmail account
 - GitHub Actions — tests and Cloudflare deployment
 - Vanilla HTML/CSS/JS — deliberately small frontend
 
@@ -37,7 +37,7 @@ For unknown websites the detector intentionally favors avoiding false positives.
 - Session tokens are random, stored only as SHA-256 hashes, and delivered in `HttpOnly`, `Secure`, `SameSite=Lax` cookies.
 - Availability notifications are only sent to verified email addresses.
 - API mutations enforce same-origin requests.
-- The Resend API key belongs in a Cloudflare secret, never in Git.
+- Google OAuth client credentials and refresh token belong in Cloudflare secrets, never in Git.
 
 ## Local development
 

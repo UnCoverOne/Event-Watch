@@ -22,7 +22,8 @@
   "vars": {
     "APP_NAME": "Event Watch",
     "APP_ORIGIN": "https://REPLACE_WITH_YOUR_WORKERS_DEV_DOMAIN.workers.dev",
-    "NOTIFICATION_FROM": "Event Watch <notifications@REPLACE_WITH_YOUR_VERIFIED_DOMAIN>",
+    "GMAIL_FROM_NAME": "Event Watch",
+    "GMAIL_SENDER_EMAIL": "REPLACE_WITH_YOUR_GMAIL_ADDRESS",
     "CHECK_BATCH_SIZE": "50",
     "CHECK_CONCURRENCY": "5"
   }

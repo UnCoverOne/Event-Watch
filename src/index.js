@@ -1,0 +1,25 @@
+import { handleApi } from './api.js';
+import { runChecks } from './checker.js';
+import { HttpError, json } from './utils.js';
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    try {
+      if (url.pathname.startsWith('/api/')) {
+        return await handleApi(request, env);
+      }
+      return env.ASSETS.fetch(request);
+    } catch (error) {
+      if (error instanceof HttpError) {
+        return json({ error: error.message, code: error.code }, error.status);
+      }
+      console.error(error);
+      return json({ error: 'Internal server error', code: 'internal_error' }, 500);
+    }
+  },
+
+  async scheduled(controller, env, ctx) {
+    ctx.waitUntil(runChecks(env));
+  },
+};

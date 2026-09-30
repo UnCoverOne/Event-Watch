@@ -148,13 +148,28 @@ function extractEventDetails(raw, title) {
     if (!candidate || candidate === title) continue;
     if (/^Starts at\b/i.test(candidate)) break;
     if (/^(?:EVENT DETAILS|START TIME|EST\. END TIME|PLAYERS|CAPACITY|STRUCTURE)$/i.test(candidate)) break;
-    if (looksLikeAddress(candidate)) continue;
     if (/^\d+\s+players?$/i.test(candidate)) continue;
+
+    const storePrefix = storeNameBeforeAddress(candidate);
+    if (storePrefix) {
+      hostLgs = storePrefix.slice(0, 300);
+      break;
+    }
+
+    if (looksLikeAddress(candidate)) continue;
     hostLgs = candidate.slice(0, 300);
     break;
   }
 
   return { eventDate, hostLgs };
+}
+
+function storeNameBeforeAddress(value) {
+  const text = String(value || '').trim();
+  const match = text.match(/^(.*?)(\d{1,6}\s+\S[\s\S]*)$/);
+  const prefix = match?.[1]?.trim();
+  if (!prefix || prefix.length < 2) return null;
+  return prefix;
 }
 
 function looksLikeAddress(value) {

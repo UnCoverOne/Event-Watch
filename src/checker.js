@@ -75,6 +75,8 @@ export async function checkOneEvent(env, event, options = {}) {
     await env.DB.prepare(`
       UPDATE events SET
         title = COALESCE(?, title),
+        event_date = COALESCE(?, event_date),
+        host_lgs = COALESCE(?, host_lgs),
         status = ?,
         status_reason = ?,
         current_players = ?,
@@ -87,6 +89,8 @@ export async function checkOneEvent(env, event, options = {}) {
       WHERE id = ?
     `).bind(
       parsed.title,
+      parsed.eventDate ?? null,
+      parsed.hostLgs ?? null,
       parsed.status,
       parsed.reason,
       parsed.currentPlayers,

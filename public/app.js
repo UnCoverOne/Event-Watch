@@ -323,17 +323,24 @@ function renderEvents() {
 function buildEventCard(event, archived) {
   const card = document.createElement('article');
   card.className = `event-card panel${archived ? ' archived-card' : ''}`;
-  const capacity = event.capacity != null && event.current_players != null
-    ? `${event.current_players}/${event.capacity} players` : null;
+  const players = event.capacity != null && event.current_players != null
+    ? `${event.current_players}/${event.capacity}`
+    : (event.current_players != null ? String(event.current_players) : '—');
+  const eventDate = event.event_date || '—';
+  const hostLgs = event.host_lgs || '—';
 
   if (archived) {
     card.innerHTML = `
       <div class="event-main">
         <p class="event-title"></p>
-        <div class="event-meta">
+        <div class="event-facts">
+          ${eventFact('Date', eventDate)}
+          ${eventFact('LGS', hostLgs)}
+          ${eventStatusFact(event.status)}
+          ${eventFact('Players', players)}
+        </div>
+        <div class="event-activity">
           <span class="archive-badge">Archived</span>
-          <span class="status ${statusClassName(event.status)}"><span class="status-dot"></span>${escapeText(formatStatus(event.status))}</span>
-          ${capacity ? `<span>${escapeText(capacity)}</span>` : ''}
           <span>${escapeText(event.last_checked_at ? `Last checked ${timeAgo(event.last_checked_at)}` : 'Never checked')}</span>
           <a href="${escapeAttribute(event.event_url)}" target="_blank" rel="noopener noreferrer">Open event</a>
         </div>
@@ -354,9 +361,13 @@ function buildEventCard(event, archived) {
   card.innerHTML = `
     <div class="event-main">
       <p class="event-title"></p>
-      <div class="event-meta">
-        <span class="status ${statusClassName(event.status)}"><span class="status-dot"></span>${escapeText(formatStatus(event.status))}</span>
-        ${capacity ? `<span>${escapeText(capacity)}</span>` : ''}
+      <div class="event-facts">
+        ${eventFact('Date', eventDate)}
+        ${eventFact('LGS', hostLgs)}
+        ${eventStatusFact(event.status)}
+        ${eventFact('Players', players)}
+      </div>
+      <div class="event-activity">
         <span>${escapeText(event.last_checked_at ? `Checked ${timeAgo(event.last_checked_at)}` : 'Not checked yet')}</span>
         <span>${escapeText(event.next_check_at ? `Next ${relativeFuture(event.next_check_at)}` : 'Check due')}</span>
         <a href="${escapeAttribute(event.event_url)}" target="_blank" rel="noopener noreferrer">Open event</a>
@@ -379,6 +390,24 @@ function buildEventCard(event, archived) {
   card.querySelector('.archive').addEventListener('click', () => archiveEvent(event.event_id));
   card.querySelector('.delete').addEventListener('click', () => deleteEvent(event.event_id));
   return card;
+}
+
+function eventFact(label, value) {
+  return `
+    <div class="event-fact">
+      <span class="event-fact-label">${escapeText(label)}</span>
+      <span class="event-fact-value" title="${escapeAttribute(value)}">${escapeText(value)}</span>
+    </div>`;
+}
+
+function eventStatusFact(status) {
+  return `
+    <div class="event-fact">
+      <span class="event-fact-label">Status</span>
+      <span class="status ${statusClassName(status)} event-fact-value">
+        <span class="status-dot"></span>${escapeText(formatStatus(status))}
+      </span>
+    </div>`;
 }
 
 function renderStores() {

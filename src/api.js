@@ -75,6 +75,8 @@ export async function handleApi(request, env) {
         e.adapter,
         e.source_host,
         e.title,
+        e.event_date,
+        e.host_lgs,
         e.status,
         e.status_reason,
         e.current_players,

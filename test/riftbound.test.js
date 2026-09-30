@@ -40,3 +40,46 @@ test('does not treat description text saying sign up as an available join contro
     <html><body><h1>Store Event</h1><p>Sign up in store to reserve a place.</p></body></html>`);
   assert.equal(result.status, 'UNAVAILABLE');
 });
+
+
+test('extracts event date and host LGS from Riftbound event header details', () => {
+  const result = parseRiftboundHtml(`
+    <html><body>
+      <h1>Tuesday Evening Nexus Night - 1v1 @ Three Kingdoms</h1>
+      <div><span>Apr 14, 2026</span></div>
+      <div><a href="/stores/example-store">Three Kingdoms Games</a></div>
+      <div>112 Main Street Markham North, Markham, ON, L3P 1Y1, CA</div>
+      <div>Starts at 6:30 PM (EDT)</div>
+      <button>Log In to Join</button>
+    </body></html>`);
+
+  assert.equal(result.eventDate, 'Apr 14, 2026');
+  assert.equal(result.hostLgs, 'Three Kingdoms Games');
+});
+
+test('leaves host LGS empty if only address-like text follows the event date', () => {
+  const result = parseRiftboundHtml(`
+    <html><body>
+      <h1>Example Event</h1>
+      <div>Jul 8, 2026</div>
+      <div>117 Russell Parkway, Suite F &amp; G, Warner Robins, GA, 31088, US</div>
+      <div>Starts at 6:30 PM (EDT)</div>
+    </body></html>`);
+
+  assert.equal(result.eventDate, 'Jul 8, 2026');
+  assert.equal(result.hostLgs, null);
+});
+
+
+test('extracts LGS when store name and address are concatenated in page text', () => {
+  const result = parseRiftboundHtml(`
+    <html><body>
+      <h1>Riftbound Vendetta Summoner Skirmish @ Taps Games</h1>
+      <div>Sep 19, 2026</div>
+      <div>Taps Games2854 Calgary Trl NW, Edmonton, AB T6J 6V7, Canada</div>
+      <div>Starts at 10:00 AM (MDT)</div>
+    </body></html>`);
+
+  assert.equal(result.eventDate, 'Sep 19, 2026');
+  assert.equal(result.hostLgs, 'Taps Games');
+});

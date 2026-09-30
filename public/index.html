@@ -32,7 +32,7 @@
       <div class="hero">
         <p class="eyebrow">Event availability alerts</p>
         <h1>Stop refreshing.<br />Catch the opening.</h1>
-        <p class="lede">Watch event pages across the web and get an email when registration, booking, or tickets appear to become available.</p>
+        <p class="lede">Watch event pages and local game store listings, then get one email digest when something changes.</p>
       </div>
 
       <div class="panel auth-panel">
@@ -51,7 +51,7 @@
             <input id="passwordInput" type="password" autocomplete="current-password" required minlength="12" placeholder="12+ characters" />
           </label>
           <button id="authSubmit" class="primary" type="submit">Sign in</button>
-          <p id="authHint" class="hint">New accounts use a 12+ character password.</p>
+          <p class="hint">New accounts use a 12+ character password.</p>
           <p id="authError" class="error" aria-live="polite"></p>
         </form>
       </div>
@@ -60,7 +60,7 @@
     <section id="dashboardView" class="hidden">
       <div class="dashboard-head">
         <div>
-          <p class="eyebrow">Event watchlist</p>
+          <p class="eyebrow">Watch dashboard</p>
           <h1>Your watches</h1>
           <p id="accountLine" class="muted"></p>
         </div>
@@ -70,47 +70,70 @@
         </div>
       </div>
 
-      <form id="addForm" class="add-form panel">
-        <div class="add-form-grid">
-          <label for="eventUrl">
-            <span>Event page URL</span>
-            <input id="eventUrl" type="url" required placeholder="https://example.com/events/your-event" />
-          </label>
-          <label for="checkInterval">
-            <span>Refresh rate</span>
-            <select id="checkInterval">
-              <option value="5">Every 5 minutes</option>
-              <option value="10">Every 10 minutes</option>
-              <option value="15">Every 15 minutes</option>
-              <option value="30">Every 30 minutes</option>
-              <option value="60">Every hour</option>
-              <option value="180">Every 3 hours</option>
-              <option value="360">Every 6 hours</option>
-              <option value="720">Every 12 hours</option>
-              <option value="1440">Every day</option>
-            </select>
-          </label>
-          <button class="primary add-button" type="submit">Watch event</button>
+      <div class="watch-tabs" role="tablist" aria-label="Watch type">
+        <button id="eventWatchTab" class="watch-tab active" type="button" role="tab">Events</button>
+        <button id="lgsWatchTab" class="watch-tab" type="button" role="tab">LGS pages</button>
+      </div>
+
+      <section id="eventPane">
+        <form id="addForm" class="add-form panel">
+          <div class="add-form-grid">
+            <label for="eventUrl">
+              <span>Event page URL</span>
+              <input id="eventUrl" type="url" required placeholder="https://example.com/events/your-event" />
+            </label>
+            <label for="checkInterval">
+              <span>Refresh rate</span>
+              <select id="checkInterval" class="interval-select"></select>
+            </label>
+            <button class="primary add-button" type="submit">Watch event</button>
+          </div>
+          <p id="addError" class="error" aria-live="polite"></p>
+        </form>
+
+        <div class="section-line">
+          <span id="eventCount">0 events</span>
+          <button id="refreshButton" class="link-button" type="button">Refresh</button>
         </div>
-        <p id="addError" class="error" aria-live="polite"></p>
-      </form>
+        <div id="events" class="event-list"></div>
+        <div id="emptyState" class="empty panel hidden">
+          <p>No watched events yet.</p>
+          <span>Paste an HTTPS event page URL above to start monitoring it.</span>
+        </div>
+      </section>
 
-      <div class="section-line">
-        <span id="eventCount">0 events</span>
-        <button id="refreshButton" class="link-button" type="button">Refresh</button>
-      </div>
+      <section id="lgsPane" class="hidden">
+        <form id="lgsAddForm" class="add-form panel">
+          <div class="add-form-grid">
+            <label for="lgsUrl">
+              <span>Riftbound LGS page URL</span>
+              <input id="lgsUrl" type="url" required placeholder="https://locator.riftbound.uvsgames.com/stores/..." />
+            </label>
+            <label for="lgsCheckInterval">
+              <span>Refresh rate</span>
+              <select id="lgsCheckInterval" class="interval-select"></select>
+            </label>
+            <button class="primary add-button" type="submit">Watch LGS</button>
+          </div>
+          <p class="hint form-hint">The current event list becomes the baseline. You are alerted only when a new event appears later.</p>
+          <p id="lgsAddError" class="error" aria-live="polite"></p>
+        </form>
 
-      <div id="events" class="event-list"></div>
-
-      <div id="emptyState" class="empty panel hidden">
-        <p>No watched events yet.</p>
-        <span>Paste an HTTPS event page URL above to start monitoring it.</span>
-      </div>
+        <div class="section-line">
+          <span id="lgsCount">0 LGS pages</span>
+          <button id="lgsRefreshButton" class="link-button" type="button">Refresh</button>
+        </div>
+        <div id="lgsStores" class="event-list"></div>
+        <div id="lgsEmptyState" class="empty panel hidden">
+          <p>No watched LGS pages yet.</p>
+          <span>Add a Riftbound Gaming Network store page to watch for newly listed events.</span>
+        </div>
+      </section>
     </section>
 
     <footer>
-      <span>Scheduler wakes every 5 minutes; each event follows its selected refresh rate.</span>
-      <span>Independent availability monitor; always confirm on the source event page.</span>
+      <span>Scheduler wakes every 5 minutes; each watch follows its selected refresh rate.</span>
+      <span>Updates found in the same scheduler window are grouped into one email.</span>
     </footer>
   </main>
   <script type="module" src="/app.js"></script>

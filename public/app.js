@@ -1,5 +1,10 @@
-const state = { mode: 'login', user: null, events: [] };
+const state = { mode: 'login', user: null, events: [], stores: [], watchTab: 'events' };
 const $ = (id) => document.getElementById(id);
+const INTERVALS = [
+  [5, 'Every 5 minutes'], [10, 'Every 10 minutes'], [15, 'Every 15 minutes'],
+  [30, 'Every 30 minutes'], [60, 'Every hour'], [180, 'Every 3 hours'],
+  [360, 'Every 6 hours'], [720, 'Every 12 hours'], [1440, 'Every day'],
+];
 
 const authView = $('authView');
 const dashboardView = $('dashboardView');
@@ -18,6 +23,11 @@ const addError = $('addError');
 const eventsEl = $('events');
 const emptyState = $('emptyState');
 const eventCount = $('eventCount');
+const lgsAddForm = $('lgsAddForm');
+const lgsAddError = $('lgsAddError');
+const lgsStoresEl = $('lgsStores');
+const lgsEmptyState = $('lgsEmptyState');
+const lgsCount = $('lgsCount');
 const themeToggle = $('themeToggle');
 const themeLabel = $('themeLabel');
 
@@ -26,24 +36,26 @@ registerTab.addEventListener('click', () => setAuthMode('register'));
 authForm.addEventListener('submit', onAuthSubmit);
 logoutButton.addEventListener('click', onLogout);
 addForm.addEventListener('submit', onAddEvent);
+lgsAddForm.addEventListener('submit', onAddLgs);
 $('refreshButton').addEventListener('click', loadEvents);
+$('lgsRefreshButton').addEventListener('click', loadStores);
 $('resendVerification').addEventListener('click', resendVerification);
+$('eventWatchTab').addEventListener('click', () => setWatchTab('events'));
+$('lgsWatchTab').addEventListener('click', () => setWatchTab('lgs'));
 themeToggle.addEventListener('click', toggleTheme);
 
+fillIntervalSelect($('checkInterval'));
+fillIntervalSelect($('lgsCheckInterval'));
 init();
 
 async function init() {
   syncThemeUi();
-
-  if (new URL(location.href).searchParams.get('verified') === '1') {
-    history.replaceState({}, '', '/');
-  }
+  if (new URL(location.href).searchParams.get('verified') === '1') history.replaceState({}, '', '/');
 
   const data = await api('/api/me').catch(() => ({ user: null }));
   state.user = data.user;
   renderSession();
-
-  if (state.user) await loadEvents();
+  if (state.user) await Promise.all([loadEvents(), loadStores()]);
 }
 
 function toggleTheme() {
@@ -73,22 +85,29 @@ function setAuthMode(mode) {
   authError.textContent = '';
 }
 
+function setWatchTab(tab) {
+  state.watchTab = tab;
+  const eventsActive = tab === 'events';
+  $('eventWatchTab').classList.toggle('active', eventsActive);
+  $('lgsWatchTab').classList.toggle('active', !eventsActive);
+  $('eventPane').classList.toggle('hidden', !eventsActive);
+  $('lgsPane').classList.toggle('hidden', eventsActive);
+}
+
 async function onAuthSubmit(event) {
   event.preventDefault();
   authError.textContent = '';
   authSubmit.disabled = true;
-
   try {
     const endpoint = state.mode === 'login' ? '/api/auth/login' : '/api/auth/register';
     const data = await api(endpoint, {
       method: 'POST',
       body: { email: emailInput.value, password: passwordInput.value },
     });
-
     state.user = data.user;
     authForm.reset();
     renderSession();
-    await loadEvents();
+    await Promise.all([loadEvents(), loadStores()]);
   } catch (error) {
     authError.textContent = error.message;
   } finally {
@@ -100,6 +119,7 @@ async function onLogout() {
   await api('/api/auth/logout', { method: 'POST' }).catch(() => {});
   state.user = null;
   state.events = [];
+  state.stores = [];
   renderSession();
 }
 
@@ -108,16 +128,14 @@ function renderSession() {
   authView.classList.toggle('hidden', signedIn);
   dashboardView.classList.toggle('hidden', !signedIn);
   logoutButton.classList.toggle('hidden', !signedIn);
-
   if (!signedIn) return;
-
   accountLine.textContent = state.user.email;
   verificationBox.classList.toggle('hidden', state.user.emailVerified);
+  setWatchTab(state.watchTab);
 }
 
 async function loadEvents() {
   if (!state.user) return;
-
   try {
     const data = await api('/api/events');
     state.events = data.events || [];
@@ -127,25 +145,28 @@ async function loadEvents() {
   }
 }
 
+async function loadStores() {
+  if (!state.user) return;
+  try {
+    const data = await api('/api/lgs');
+    state.stores = data.stores || [];
+    renderStores();
+  } catch (error) {
+    lgsAddError.textContent = error.message;
+  }
+}
+
 async function onAddEvent(event) {
   event.preventDefault();
-  const input = $('eventUrl');
-  const interval = $('checkInterval');
   addError.textContent = '';
-
   const button = addForm.querySelector('button[type=submit]');
   button.disabled = true;
-
   try {
     await api('/api/events', {
       method: 'POST',
-      body: {
-        url: input.value,
-        checkIntervalMinutes: Number(interval.value),
-      },
+      body: { url: $('eventUrl').value, checkIntervalMinutes: Number($('checkInterval').value) },
     });
-
-    input.value = '';
+    $('eventUrl').value = '';
     await loadEvents();
   } catch (error) {
     addError.textContent = error.message;
@@ -154,18 +175,44 @@ async function onAddEvent(event) {
   }
 }
 
+async function onAddLgs(event) {
+  event.preventDefault();
+  lgsAddError.textContent = '';
+  const button = lgsAddForm.querySelector('button[type=submit]');
+  button.disabled = true;
+  try {
+    await api('/api/lgs', {
+      method: 'POST',
+      body: { url: $('lgsUrl').value, checkIntervalMinutes: Number($('lgsCheckInterval').value) },
+    });
+    $('lgsUrl').value = '';
+    await loadStores();
+  } catch (error) {
+    lgsAddError.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function updateRefreshRate(eventId, minutes, select) {
   select.disabled = true;
-
   try {
     await api(`/api/events/${encodeURIComponent(eventId)}`, {
-      method: 'PATCH',
-      body: { checkIntervalMinutes: Number(minutes) },
+      method: 'PATCH', body: { checkIntervalMinutes: Number(minutes) },
     });
     await loadEvents();
-  } catch (error) {
-    select.title = error.message;
-    await loadEvents();
+  } finally {
+    select.disabled = false;
+  }
+}
+
+async function updateLgsRefreshRate(storeId, minutes, select) {
+  select.disabled = true;
+  try {
+    await api(`/api/lgs/${encodeURIComponent(storeId)}`, {
+      method: 'PATCH', body: { checkIntervalMinutes: Number(minutes) },
+    });
+    await loadStores();
   } finally {
     select.disabled = false;
   }
@@ -176,12 +223,26 @@ async function removeEvent(eventId) {
   await loadEvents();
 }
 
+async function removeLgs(storeId) {
+  await api(`/api/lgs/${encodeURIComponent(storeId)}`, { method: 'DELETE' });
+  await loadStores();
+}
+
 async function checkEvent(eventId, button) {
   button.disabled = true;
-
   try {
     await api(`/api/events/${encodeURIComponent(eventId)}/check`, { method: 'POST' });
     await loadEvents();
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function checkLgs(storeId, button) {
+  button.disabled = true;
+  try {
+    await api(`/api/lgs/${encodeURIComponent(storeId)}/check`, { method: 'POST' });
+    await loadStores();
   } finally {
     button.disabled = false;
   }
@@ -191,17 +252,13 @@ async function resendVerification() {
   const button = $('resendVerification');
   button.disabled = true;
   const original = button.textContent;
-
   try {
     await api('/api/auth/resend-verification', { method: 'POST' });
     button.textContent = 'Sent';
   } catch (error) {
     button.textContent = error.message;
   } finally {
-    setTimeout(() => {
-      button.textContent = original;
-      button.disabled = false;
-    }, 2200);
+    setTimeout(() => { button.textContent = original; button.disabled = false; }, 2200);
   }
 }
 
@@ -213,39 +270,24 @@ function renderEvents() {
   for (const event of state.events) {
     const card = document.createElement('article');
     card.className = 'event-card panel';
-
-    const statusClass = statusClassName(event.status);
     const capacity = event.capacity != null && event.current_players != null
-      ? `${event.current_players}/${event.capacity} players`
-      : null;
-    const checked = event.last_checked_at
-      ? `Checked ${timeAgo(event.last_checked_at)}`
-      : 'Not checked yet';
-    const nextCheck = event.next_check_at
-      ? `Next ${relativeFuture(event.next_check_at)}`
-      : 'Check due';
+      ? `${event.current_players}/${event.capacity} players` : null;
 
     card.innerHTML = `
       <div class="event-main">
         <p class="event-title"></p>
         <div class="event-meta">
-          <span class="status ${statusClass}"><span class="status-dot"></span>${escapeText(formatStatus(event.status))}</span>
+          <span class="status ${statusClassName(event.status)}"><span class="status-dot"></span>${escapeText(formatStatus(event.status))}</span>
           ${capacity ? `<span>${escapeText(capacity)}</span>` : ''}
-          <span>${escapeText(checked)}</span>
-          <span>${escapeText(nextCheck)}</span>
+          <span>${escapeText(event.last_checked_at ? `Checked ${timeAgo(event.last_checked_at)}` : 'Not checked yet')}</span>
+          <span>${escapeText(event.next_check_at ? `Next ${relativeFuture(event.next_check_at)}` : 'Check due')}</span>
           <a href="${escapeAttribute(event.event_url)}" target="_blank" rel="noopener noreferrer">Open event</a>
         </div>
         <p class="event-reason">${escapeText(event.status_reason || 'Waiting for the next check.')}</p>
         ${event.last_error ? `<p class="event-error">Last check error: ${escapeText(event.last_error)}</p>` : ''}
       </div>
-
       <div class="card-controls">
-        <label class="interval-control">
-          <span>Refresh</span>
-          <select class="event-interval">
-            ${intervalOptions(event.check_interval_minutes)}
-          </select>
-        </label>
+        <label class="interval-control"><span>Refresh</span><select class="event-interval">${intervalOptions(event.check_interval_minutes, true)}</select></label>
         <div class="card-actions">
           <button class="icon-button check" type="button">Check now</button>
           <button class="icon-button remove" type="button">Remove</button>
@@ -253,51 +295,66 @@ function renderEvents() {
       </div>`;
 
     card.querySelector('.event-title').textContent = event.title || event.source_host || 'Watched event';
-
-    const intervalSelect = card.querySelector('.event-interval');
-    intervalSelect.addEventListener('change', (e) => {
-      updateRefreshRate(event.event_id, e.currentTarget.value, e.currentTarget);
-    });
-
-    card.querySelector('.check').addEventListener('click', (e) => {
-      checkEvent(event.event_id, e.currentTarget);
-    });
-
-    card.querySelector('.remove').addEventListener('click', () => {
-      removeEvent(event.event_id);
-    });
-
+    card.querySelector('.event-interval').addEventListener('change', (e) => updateRefreshRate(event.event_id, e.currentTarget.value, e.currentTarget));
+    card.querySelector('.check').addEventListener('click', (e) => checkEvent(event.event_id, e.currentTarget));
+    card.querySelector('.remove').addEventListener('click', () => removeEvent(event.event_id));
     eventsEl.appendChild(card);
   }
 }
 
-function intervalOptions(selected) {
-  const options = [
-    [5, '5 min'],
-    [10, '10 min'],
-    [15, '15 min'],
-    [30, '30 min'],
-    [60, '1 hour'],
-    [180, '3 hours'],
-    [360, '6 hours'],
-    [720, '12 hours'],
-    [1440, '1 day'],
-  ];
+function renderStores() {
+  lgsCount.textContent = `${state.stores.length} LGS page${state.stores.length === 1 ? '' : 's'}`;
+  lgsEmptyState.classList.toggle('hidden', state.stores.length !== 0);
+  lgsStoresEl.innerHTML = '';
 
-  return options
-    .map(([value, label]) => `<option value="${value}" ${Number(selected) === value ? 'selected' : ''}>${label}</option>`)
-    .join('');
+  for (const store of state.stores) {
+    const card = document.createElement('article');
+    card.className = 'event-card panel';
+    const known = Number(store.known_event_count || 0);
+    const status = store.last_error ? 'Check error' : (store.initialized_at ? 'Watching' : 'Initializing');
+
+    card.innerHTML = `
+      <div class="event-main">
+        <p class="event-title"></p>
+        <div class="event-meta">
+          <span class="store-status"><span class="status-dot"></span>${escapeText(status)}</span>
+          <span>${known} known event${known === 1 ? '' : 's'}</span>
+          <span>${escapeText(store.last_checked_at ? `Checked ${timeAgo(store.last_checked_at)}` : 'Not checked yet')}</span>
+          <span>${escapeText(store.next_check_at ? `Next ${relativeFuture(store.next_check_at)}` : 'Check due')}</span>
+          <a href="${escapeAttribute(store.store_url)}" target="_blank" rel="noopener noreferrer">Open LGS</a>
+        </div>
+        <p class="event-reason">New event listings on this page will trigger an alert.</p>
+        ${store.last_error ? `<p class="event-error">Last check error: ${escapeText(store.last_error)}</p>` : ''}
+      </div>
+      <div class="card-controls">
+        <label class="interval-control"><span>Refresh</span><select class="lgs-interval">${intervalOptions(store.check_interval_minutes, true)}</select></label>
+        <div class="card-actions">
+          <button class="icon-button check" type="button">Check now</button>
+          <button class="icon-button remove" type="button">Remove</button>
+        </div>
+      </div>`;
+
+    card.querySelector('.event-title').textContent = store.title || store.source_host || 'Watched LGS';
+    card.querySelector('.lgs-interval').addEventListener('change', (e) => updateLgsRefreshRate(store.store_id, e.currentTarget.value, e.currentTarget));
+    card.querySelector('.check').addEventListener('click', (e) => checkLgs(store.store_id, e.currentTarget));
+    card.querySelector('.remove').addEventListener('click', () => removeLgs(store.store_id));
+    lgsStoresEl.appendChild(card);
+  }
+}
+
+function fillIntervalSelect(select) {
+  select.innerHTML = intervalOptions(5, false);
+}
+
+function intervalOptions(selected, compact) {
+  return INTERVALS.map(([value, label]) => {
+    const text = compact ? label.replace(/^Every /, '') : label;
+    return `<option value="${value}" ${Number(selected) === value ? 'selected' : ''}>${text}</option>`;
+  }).join('');
 }
 
 function formatStatus(status) {
-  return ({
-    AVAILABLE: 'Available',
-    FULL: 'Full',
-    NOT_OPEN: 'Not open',
-    CLOSED: 'Closed',
-    UNAVAILABLE: 'Unavailable',
-    UNKNOWN: 'Unknown',
-  })[status] || status;
+  return ({ AVAILABLE: 'Available', FULL: 'Full', NOT_OPEN: 'Not open', CLOSED: 'Closed', UNAVAILABLE: 'Unavailable', UNKNOWN: 'Unknown' })[status] || status;
 }
 
 function statusClassName(status) {
@@ -310,61 +367,37 @@ function statusClassName(status) {
 function timeAgo(value) {
   const ms = Date.now() - new Date(value).getTime();
   if (!Number.isFinite(ms) || ms < 0) return 'just now';
-
   const minutes = Math.floor(ms / 60_000);
   if (minutes < 1) return 'just now';
   if (minutes < 60) return `${minutes}m ago`;
-
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
-
   return `${Math.floor(hours / 24)}d ago`;
 }
 
 function relativeFuture(value) {
   const ms = new Date(value).getTime() - Date.now();
   if (!Number.isFinite(ms) || ms <= 30_000) return 'check due';
-
   const minutes = Math.max(1, Math.ceil(ms / 60_000));
   if (minutes < 60) return `in ${minutes}m`;
-
   const hours = Math.ceil(minutes / 60);
   if (hours < 24) return `in ${hours}h`;
-
-  const days = Math.ceil(hours / 24);
-  return `in ${days}d`;
+  return `in ${Math.ceil(hours / 24)}d`;
 }
 
 async function api(url, options = {}) {
-  const init = {
-    method: options.method || 'GET',
-    headers: { ...(options.headers || {}) },
-  };
-
+  const init = { method: options.method || 'GET', headers: { ...(options.headers || {}) } };
   if (options.body !== undefined) {
     init.headers['content-type'] = 'application/json';
     init.body = JSON.stringify(options.body);
   }
-
   const response = await fetch(url, init);
   const data = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    throw new Error(data.error || `Request failed (${response.status})`);
-  }
-
+  if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
   return data;
 }
 
 function escapeText(value) {
-  return String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;');
+  return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#039;');
 }
-
-function escapeAttribute(value) {
-  return escapeText(value);
-}
+function escapeAttribute(value) { return escapeText(value); }

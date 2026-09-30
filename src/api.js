@@ -11,6 +11,7 @@ import {
 } from './auth.js';
 import { checkOneEvent } from './checker.js';
 import { normalizeEventUrl } from './adapters.js';
+import { normalizeCheckInterval, nextCheckAt } from './schedule.js';
 import { HttpError, json, nowIso, readJson, uuid } from './utils.js';
 
 export async function handleApi(request, env) {
@@ -28,8 +29,7 @@ export async function handleApi(request, env) {
     return Response.redirect(target.toString(), 302);
   }
 
-  if (method === 'POST') assertSameOrigin(request);
-  if (method === 'DELETE') assertSameOrigin(request);
+  if (['POST', 'DELETE', 'PATCH'].includes(method)) assertSameOrigin(request);
 
   if (method === 'POST' && url.pathname === '/api/auth/register') {
     const body = await readJson(request);
@@ -65,6 +65,8 @@ export async function handleApi(request, env) {
     const rows = await env.DB.prepare(`
       SELECT
         s.id AS subscription_id,
+        s.check_interval_minutes,
+        s.next_check_at,
         e.id AS event_id,
         e.event_key,
         e.event_url,
@@ -91,6 +93,8 @@ export async function handleApi(request, env) {
   if (method === 'POST' && url.pathname === '/api/events') {
     const user = await requireUser(request, env);
     const body = await readJson(request);
+    const checkIntervalMinutes = normalizeCheckInterval(body.checkIntervalMinutes);
+
     let parsed;
     try {
       parsed = await normalizeEventUrl(body.url);
@@ -100,6 +104,7 @@ export async function handleApi(request, env) {
 
     const at = nowIso();
     let event = await env.DB.prepare('SELECT * FROM events WHERE event_key = ?').bind(parsed.eventKey).first();
+
     if (!event) {
       const eventId = uuid();
       await env.DB.prepare(`
@@ -109,28 +114,99 @@ export async function handleApi(request, env) {
       event = await env.DB.prepare('SELECT * FROM events WHERE id = ?').bind(eventId).first();
     }
 
-    const existing = await env.DB.prepare('SELECT id, active FROM subscriptions WHERE user_id = ? AND event_id = ?')
-      .bind(user.id, event.id).first();
+    const existing = await env.DB.prepare(
+      'SELECT id, active FROM subscriptions WHERE user_id = ? AND event_id = ?'
+    ).bind(user.id, event.id).first();
+
+    let subscriptionId;
+
     if (existing) {
-      await env.DB.prepare('UPDATE subscriptions SET active = 1, updated_at = ? WHERE id = ?').bind(at, existing.id).run();
-    } else {
+      subscriptionId = existing.id;
       await env.DB.prepare(`
-        INSERT INTO subscriptions (id, user_id, event_id, active, created_at, updated_at)
-        VALUES (?, ?, ?, 1, ?, ?)
-      `).bind(uuid(), user.id, event.id, at, at).run();
+        UPDATE subscriptions
+        SET active = 1,
+            check_interval_minutes = ?,
+            last_seen_status = 'UNKNOWN',
+            next_check_at = NULL,
+            updated_at = ?
+        WHERE id = ?
+      `).bind(checkIntervalMinutes, at, existing.id).run();
+    } else {
+      subscriptionId = uuid();
+      await env.DB.prepare(`
+        INSERT INTO subscriptions (
+          id, user_id, event_id, active, check_interval_minutes,
+          last_seen_status, next_check_at, created_at, updated_at
+        )
+        VALUES (?, ?, ?, 1, ?, 'UNKNOWN', NULL, ?, ?)
+      `).bind(subscriptionId, user.id, event.id, checkIntervalMinutes, at, at).run();
     }
 
-    await checkOneEvent(env, event);
-    const refreshed = await env.DB.prepare('SELECT * FROM events WHERE id = ?').bind(event.id).first();
+    await checkOneEvent(env, event, { subscriptionId });
+
+    const refreshed = await env.DB.prepare(`
+      SELECT
+        s.id AS subscription_id,
+        s.check_interval_minutes,
+        s.next_check_at,
+        e.*
+      FROM subscriptions s
+      JOIN events e ON e.id = s.event_id
+      WHERE s.id = ?
+    `).bind(subscriptionId).first();
+
     return json({ event: refreshed }, 201);
   }
 
-  const deleteMatch = url.pathname.match(/^\/api\/events\/([^/]+)$/);
-  if (method === 'DELETE' && deleteMatch) {
+  const eventMatch = url.pathname.match(/^\/api\/events\/([^/]+)$/);
+
+  if (method === 'PATCH' && eventMatch) {
     const user = await requireUser(request, env);
-    const eventId = deleteMatch[1];
+    const eventId = eventMatch[1];
+    const body = await readJson(request);
+    const requested = Number.parseInt(body.checkIntervalMinutes, 10);
+    const checkIntervalMinutes = normalizeCheckInterval(requested, -1);
+
+    if (checkIntervalMinutes === -1) {
+      throw new HttpError(400, 'Unsupported refresh interval.', 'invalid_refresh_interval');
+    }
+
+    const subscription = await env.DB.prepare(`
+      SELECT id
+      FROM subscriptions
+      WHERE user_id = ? AND event_id = ? AND active = 1
+    `).bind(user.id, eventId).first();
+
+    if (!subscription) throw new HttpError(404, 'Event not found.', 'not_found');
+
+    const at = nowIso();
     await env.DB.prepare(`
-      UPDATE subscriptions SET active = 0, updated_at = ? WHERE user_id = ? AND event_id = ?
+      UPDATE subscriptions
+      SET check_interval_minutes = ?,
+          next_check_at = ?,
+          updated_at = ?
+      WHERE id = ?
+    `).bind(
+      checkIntervalMinutes,
+      nextCheckAt(at, checkIntervalMinutes),
+      at,
+      subscription.id
+    ).run();
+
+    return json({
+      ok: true,
+      checkIntervalMinutes,
+      nextCheckAt: nextCheckAt(at, checkIntervalMinutes),
+    });
+  }
+
+  if (method === 'DELETE' && eventMatch) {
+    const user = await requireUser(request, env);
+    const eventId = eventMatch[1];
+    await env.DB.prepare(`
+      UPDATE subscriptions
+      SET active = 0, updated_at = ?
+      WHERE user_id = ? AND event_id = ?
     `).bind(nowIso(), user.id, eventId).run();
     return json({ ok: true });
   }
@@ -138,14 +214,28 @@ export async function handleApi(request, env) {
   const checkMatch = url.pathname.match(/^\/api\/events\/([^/]+)\/check$/);
   if (method === 'POST' && checkMatch) {
     const user = await requireUser(request, env);
-    const event = await env.DB.prepare(`
-      SELECT e.* FROM events e
+    const row = await env.DB.prepare(`
+      SELECT e.*, s.id AS subscription_id
+      FROM events e
       JOIN subscriptions s ON s.event_id = e.id
       WHERE e.id = ? AND s.user_id = ? AND s.active = 1
     `).bind(checkMatch[1], user.id).first();
-    if (!event) throw new HttpError(404, 'Event not found.', 'not_found');
-    const result = await checkOneEvent(env, event);
-    const refreshed = await env.DB.prepare('SELECT * FROM events WHERE id = ?').bind(event.id).first();
+
+    if (!row) throw new HttpError(404, 'Event not found.', 'not_found');
+
+    const result = await checkOneEvent(env, row, { subscriptionId: row.subscription_id });
+
+    const refreshed = await env.DB.prepare(`
+      SELECT
+        s.id AS subscription_id,
+        s.check_interval_minutes,
+        s.next_check_at,
+        e.*
+      FROM subscriptions s
+      JOIN events e ON e.id = s.event_id
+      WHERE s.id = ?
+    `).bind(row.subscription_id).first();
+
     return json({ result, event: refreshed });
   }
 

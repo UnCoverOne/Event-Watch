@@ -229,6 +229,12 @@ async function archiveEvent(eventId) {
   await loadEvents();
 }
 
+async function deleteEvent(eventId) {
+  if (!window.confirm('Permanently delete this event watch? This cannot be undone.')) return;
+  await api(`/api/events/${encodeURIComponent(eventId)}/permanent`, { method: 'DELETE' });
+  await loadEvents();
+}
+
 async function restoreEvent(eventId, button) {
   button.disabled = true;
   try {
@@ -241,6 +247,12 @@ async function restoreEvent(eventId, button) {
 
 async function archiveLgs(storeId) {
   await api(`/api/lgs/${encodeURIComponent(storeId)}`, { method: 'DELETE' });
+  await loadStores();
+}
+
+async function deleteLgs(storeId) {
+  if (!window.confirm('Permanently delete this LGS watch? This cannot be undone.')) return;
+  await api(`/api/lgs/${encodeURIComponent(storeId)}/permanent`, { method: 'DELETE' });
   await loadStores();
 }
 
@@ -328,10 +340,14 @@ function buildEventCard(event, archived) {
         <p class="event-reason">Archived for record keeping. Scheduled checks are paused.</p>
       </div>
       <div class="card-controls archive-controls">
-        <button class="icon-button restore" type="button">Restore</button>
+        <div class="card-actions">
+          <button class="icon-button restore" type="button">Restore</button>
+          <button class="icon-button delete danger-button" type="button">Delete</button>
+        </div>
       </div>`;
     card.querySelector('.event-title').textContent = event.title || event.source_host || 'Watched event';
     card.querySelector('.restore').addEventListener('click', (e) => restoreEvent(event.event_id, e.currentTarget));
+    card.querySelector('.delete').addEventListener('click', () => deleteEvent(event.event_id));
     return card;
   }
 
@@ -353,6 +369,7 @@ function buildEventCard(event, archived) {
       <div class="card-actions">
         <button class="icon-button check" type="button">Check now</button>
         <button class="icon-button archive" type="button">Archive</button>
+        <button class="icon-button delete danger-button" type="button">Delete</button>
       </div>
     </div>`;
 
@@ -360,6 +377,7 @@ function buildEventCard(event, archived) {
   card.querySelector('.event-interval').addEventListener('change', (e) => updateRefreshRate(event.event_id, e.currentTarget.value, e.currentTarget));
   card.querySelector('.check').addEventListener('click', (e) => checkEvent(event.event_id, e.currentTarget));
   card.querySelector('.archive').addEventListener('click', () => archiveEvent(event.event_id));
+  card.querySelector('.delete').addEventListener('click', () => deleteEvent(event.event_id));
   return card;
 }
 
@@ -401,10 +419,14 @@ function buildLgsCard(store, archived) {
         <p class="event-reason">Archived for record keeping. New event checks are paused.</p>
       </div>
       <div class="card-controls archive-controls">
-        <button class="icon-button restore" type="button">Restore</button>
+        <div class="card-actions">
+          <button class="icon-button restore" type="button">Restore</button>
+          <button class="icon-button delete danger-button" type="button">Delete</button>
+        </div>
       </div>`;
     card.querySelector('.event-title').textContent = store.title || store.source_host || 'Watched LGS';
     card.querySelector('.restore').addEventListener('click', (e) => restoreLgs(store.store_id, e.currentTarget));
+    card.querySelector('.delete').addEventListener('click', () => deleteLgs(store.store_id));
     return card;
   }
 
@@ -427,6 +449,7 @@ function buildLgsCard(store, archived) {
       <div class="card-actions">
         <button class="icon-button check" type="button">Check now</button>
         <button class="icon-button archive" type="button">Archive</button>
+        <button class="icon-button delete danger-button" type="button">Delete</button>
       </div>
     </div>`;
 
@@ -434,6 +457,7 @@ function buildLgsCard(store, archived) {
   card.querySelector('.lgs-interval').addEventListener('change', (e) => updateLgsRefreshRate(store.store_id, e.currentTarget.value, e.currentTarget));
   card.querySelector('.check').addEventListener('click', (e) => checkLgs(store.store_id, e.currentTarget));
   card.querySelector('.archive').addEventListener('click', () => archiveLgs(store.store_id));
+  card.querySelector('.delete').addEventListener('click', () => deleteLgs(store.store_id));
   return card;
 }
 

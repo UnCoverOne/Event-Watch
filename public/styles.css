@@ -79,6 +79,8 @@ input:focus, select:focus { border-color: var(--line-strong); box-shadow: 0 0 0 
 .card-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .icon-button { border: 1px solid var(--line); background: var(--surface-2); border-radius: 9px; padding: 8px 10px; color: var(--muted); }
 .icon-button:hover { border-color: var(--line-strong); color: var(--text); }
+.danger-button { color: var(--danger); }
+.danger-button:hover { border-color: color-mix(in srgb, var(--danger) 60%, var(--line)); color: var(--danger); }
 .event-reason { margin: 7px 0 0; font-size: 13px; color: var(--muted); } .event-error { margin: 7px 0 0; font-size: 12px; color: var(--danger); }
 .empty { padding: 34px; text-align: center; color: var(--muted); } .empty p { margin: 0 0 6px; color: var(--text); font-weight: 700; }
 footer { border-top: 1px solid var(--line); min-height: 72px; display: flex; align-items: center; justify-content: space-between; gap: 20px; color: var(--muted); font-size: 11px; }

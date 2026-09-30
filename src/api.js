@@ -285,6 +285,26 @@ export async function handleApi(request, env) {
     return json({ ok: true });
   }
 
+  const eventDeleteMatch = url.pathname.match(/^\/api\/events\/([^/]+)\/permanent$/);
+  if (method === 'DELETE' && eventDeleteMatch) {
+    const user = await requireUser(request, env);
+    const subscription = await env.DB.prepare(`
+      SELECT id FROM subscriptions WHERE user_id = ? AND event_id = ?
+    `).bind(user.id, eventDeleteMatch[1]).first();
+
+    if (!subscription) {
+      throw new HttpError(404, 'Event watch not found.', 'not_found');
+    }
+
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM alert_queue WHERE user_id = ? AND item_key LIKE ?')
+        .bind(user.id, `${subscription.id}:%`),
+      env.DB.prepare('DELETE FROM subscriptions WHERE id = ? AND user_id = ?')
+        .bind(subscription.id, user.id),
+    ]);
+    return json({ ok: true });
+  }
+
   const eventRestoreMatch = url.pathname.match(/^\/api\/events\/([^/]+)\/restore$/);
   if (method === 'POST' && eventRestoreMatch) {
     const user = await requireUser(request, env);
@@ -355,6 +375,26 @@ export async function handleApi(request, env) {
       UPDATE lgs_subscriptions SET active = 0, updated_at = ?
       WHERE user_id = ? AND store_id = ?
     `).bind(nowIso(), user.id, lgsMatch[1]).run();
+    return json({ ok: true });
+  }
+
+  const lgsDeleteMatch = url.pathname.match(/^\/api\/lgs\/([^/]+)\/permanent$/);
+  if (method === 'DELETE' && lgsDeleteMatch) {
+    const user = await requireUser(request, env);
+    const subscription = await env.DB.prepare(`
+      SELECT id FROM lgs_subscriptions WHERE user_id = ? AND store_id = ?
+    `).bind(user.id, lgsDeleteMatch[1]).first();
+
+    if (!subscription) {
+      throw new HttpError(404, 'LGS watch not found.', 'not_found');
+    }
+
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM alert_queue WHERE user_id = ? AND item_key LIKE ?')
+        .bind(user.id, `${subscription.id}:%`),
+      env.DB.prepare('DELETE FROM lgs_subscriptions WHERE id = ? AND user_id = ?')
+        .bind(subscription.id, user.id),
+    ]);
     return json({ ok: true });
   }
 

@@ -38,6 +38,7 @@ export function parseRiftboundHtml(html) {
   const raw = String(html || '');
   const text = htmlToText(raw);
   const title = extractTitle(raw, text);
+  const eventDetails = extractEventDetails(raw, title);
   const capacityInfo = extractCapacity(text);
 
   const fullText = /\b(event|registration)\s+(?:is\s+)?full\b|\bsold\s*out\b|\bjoin\s+(?:the\s+)?waitlist\b|\bwaitlist\s+only\b/i.test(text);
@@ -69,6 +70,8 @@ export function parseRiftboundHtml(html) {
 
   return {
     title,
+    eventDate: eventDetails.eventDate,
+    hostLgs: eventDetails.hostLgs,
     status,
     reason,
     currentPlayers: capacityInfo.current,
@@ -77,18 +80,36 @@ export function parseRiftboundHtml(html) {
 }
 
 export function htmlToText(html) {
-  return String(html)
+  return decodeHtml(String(html)
     .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
+    .replace(/<[^>]+>/g, ' '))
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function htmlToLines(html) {
+  const stripped = String(html)
+    .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<br\s*\/?\s*>/gi, '\n')
+    .replace(/<\/[^>]+>/g, '\n')
+    .replace(/<[^>]+>/g, ' ');
+
+  return decodeHtml(stripped)
+    .split(/\n+/)
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+}
+
+function decodeHtml(value) {
+  return String(value)
     .replace(/&nbsp;/gi, ' ')
     .replace(/&amp;/gi, '&')
     .replace(/&quot;/gi, '"')
     .replace(/&#39;|&apos;/gi, "'")
     .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/\s+/g, ' ')
-    .trim();
+    .replace(/&gt;/gi, '>');
 }
 
 function extractTitle(raw, text) {
@@ -103,6 +124,44 @@ function extractTitle(raw, text) {
   }
   const detail = text.match(/^(.{3,200}?)\s+(?:[A-Z][a-z]{2}\s+\d{1,2},\s+\d{4})\b/);
   return detail?.[1]?.slice(0, 300) || null;
+}
+
+function extractEventDetails(raw, title) {
+  const lines = htmlToLines(raw);
+  const datePattern = /^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\s+\d{1,2},\s+\d{4}$/i;
+  let dateIndex = lines.findIndex((line) => datePattern.test(line));
+
+  if (dateIndex < 0) {
+    const flattened = htmlToText(raw);
+    const match = flattened.match(/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\s+\d{1,2},\s+\d{4}\b/i);
+    return {
+      eventDate: match?.[0] || null,
+      hostLgs: null,
+    };
+  }
+
+  const eventDate = lines[dateIndex];
+  let hostLgs = null;
+
+  for (let i = dateIndex + 1; i < Math.min(lines.length, dateIndex + 10); i++) {
+    const candidate = lines[i];
+    if (!candidate || candidate === title) continue;
+    if (/^Starts at\b/i.test(candidate)) break;
+    if (/^(?:EVENT DETAILS|START TIME|EST\. END TIME|PLAYERS|CAPACITY|STRUCTURE)$/i.test(candidate)) break;
+    if (looksLikeAddress(candidate)) continue;
+    if (/^\d+\s+players?$/i.test(candidate)) continue;
+    hostLgs = candidate.slice(0, 300);
+    break;
+  }
+
+  return { eventDate, hostLgs };
+}
+
+function looksLikeAddress(value) {
+  const text = String(value || '');
+  return /\b\d{1,6}\s+\S+/.test(text)
+    || /\b(?:street|st\.?|road|rd\.?|avenue|ave\.?|boulevard|blvd\.?|lane|ln\.?|drive|dr\.?|way|parkway|pkwy\.?|suite|unit)\b/i.test(text)
+    || /,\s*[A-Z]{2,3}\s*,?\s*[A-Z0-9 -]{3,10}\b/i.test(text);
 }
 
 function extractCapacity(text) {

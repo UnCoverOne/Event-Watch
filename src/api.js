@@ -68,6 +68,7 @@ export async function handleApi(request, env) {
         s.id AS subscription_id,
         s.check_interval_minutes,
         s.next_check_at,
+        s.active,
         e.id AS event_id,
         e.event_key,
         e.event_url,
@@ -85,8 +86,8 @@ export async function handleApi(request, env) {
         s.created_at
       FROM subscriptions s
       JOIN events e ON e.id = s.event_id
-      WHERE s.user_id = ? AND s.active = 1
-      ORDER BY s.created_at DESC
+      WHERE s.user_id = ?
+      ORDER BY s.active DESC, s.created_at DESC
     `).bind(user.id).all();
     return json({ events: rows.results || [] });
   }
@@ -163,6 +164,7 @@ export async function handleApi(request, env) {
         sub.check_interval_minutes,
         sub.next_check_at,
         sub.initialized_at,
+        sub.active,
         store.id AS store_id,
         store.store_key,
         store.store_url,
@@ -179,8 +181,8 @@ export async function handleApi(request, env) {
         sub.created_at
       FROM lgs_subscriptions sub
       JOIN lgs_stores store ON store.id = sub.store_id
-      WHERE sub.user_id = ? AND sub.active = 1
-      ORDER BY sub.created_at DESC
+      WHERE sub.user_id = ?
+      ORDER BY sub.active DESC, sub.created_at DESC
     `).bind(user.id).all();
     return json({ stores: rows.results || [] });
   }
@@ -283,6 +285,22 @@ export async function handleApi(request, env) {
     return json({ ok: true });
   }
 
+  const eventRestoreMatch = url.pathname.match(/^\/api\/events\/([^/]+)\/restore$/);
+  if (method === 'POST' && eventRestoreMatch) {
+    const user = await requireUser(request, env);
+    const at = nowIso();
+    const result = await env.DB.prepare(`
+      UPDATE subscriptions
+      SET active = 1, next_check_at = NULL, updated_at = ?
+      WHERE user_id = ? AND event_id = ? AND active = 0
+    `).bind(at, user.id, eventRestoreMatch[1]).run();
+
+    if (!Number(result.meta?.changes || 0)) {
+      throw new HttpError(404, 'Archived event not found.', 'not_found');
+    }
+    return json({ ok: true });
+  }
+
   const checkMatch = url.pathname.match(/^\/api\/events\/([^/]+)\/check$/);
   if (method === 'POST' && checkMatch) {
     const user = await requireUser(request, env);
@@ -337,6 +355,22 @@ export async function handleApi(request, env) {
       UPDATE lgs_subscriptions SET active = 0, updated_at = ?
       WHERE user_id = ? AND store_id = ?
     `).bind(nowIso(), user.id, lgsMatch[1]).run();
+    return json({ ok: true });
+  }
+
+  const lgsRestoreMatch = url.pathname.match(/^\/api\/lgs\/([^/]+)\/restore$/);
+  if (method === 'POST' && lgsRestoreMatch) {
+    const user = await requireUser(request, env);
+    const at = nowIso();
+    const result = await env.DB.prepare(`
+      UPDATE lgs_subscriptions
+      SET active = 1, next_check_at = NULL, updated_at = ?
+      WHERE user_id = ? AND store_id = ? AND active = 0
+    `).bind(at, user.id, lgsRestoreMatch[1]).run();
+
+    if (!Number(result.meta?.changes || 0)) {
+      throw new HttpError(404, 'Archived LGS watch not found.', 'not_found');
+    }
     return json({ ok: true });
   }
 

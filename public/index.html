@@ -1,17 +1,31 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <meta name="theme-color" content="#0b0b0c" />
+  <meta name="theme-color" content="#0c0d0f" />
   <title>Event Watch</title>
+  <script>
+    (() => {
+      const theme = localStorage.getItem('event-watch-theme') || 'dark';
+      document.documentElement.dataset.theme = theme;
+      document.querySelector('meta[name="theme-color"]')
+        ?.setAttribute('content', theme === 'dark' ? '#0c0d0f' : '#f4f4f1');
+    })();
+  </script>
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
   <main class="shell">
     <header class="topbar">
       <a class="brand" href="/" aria-label="Event Watch home">Event Watch<span class="dot">.</span></a>
-      <button id="logoutButton" class="link-button hidden" type="button">Sign out</button>
+      <div class="top-actions">
+        <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch to light mode">
+          <span class="theme-icon" aria-hidden="true">☀</span>
+          <span id="themeLabel">Light</span>
+        </button>
+        <button id="logoutButton" class="link-button hidden" type="button">Sign out</button>
+      </div>
     </header>
 
     <section id="authView" class="auth-grid">
@@ -57,10 +71,26 @@
       </div>
 
       <form id="addForm" class="add-form panel">
-        <label for="eventUrl">Event page URL</label>
-        <div class="input-row">
-          <input id="eventUrl" type="url" required placeholder="https://example.com/events/your-event" />
-          <button class="primary" type="submit">Watch event</button>
+        <div class="add-form-grid">
+          <label for="eventUrl">
+            <span>Event page URL</span>
+            <input id="eventUrl" type="url" required placeholder="https://example.com/events/your-event" />
+          </label>
+          <label for="checkInterval">
+            <span>Refresh rate</span>
+            <select id="checkInterval">
+              <option value="5">Every 5 minutes</option>
+              <option value="10">Every 10 minutes</option>
+              <option value="15">Every 15 minutes</option>
+              <option value="30">Every 30 minutes</option>
+              <option value="60">Every hour</option>
+              <option value="180">Every 3 hours</option>
+              <option value="360">Every 6 hours</option>
+              <option value="720">Every 12 hours</option>
+              <option value="1440">Every day</option>
+            </select>
+          </label>
+          <button class="primary add-button" type="submit">Watch event</button>
         </div>
         <p id="addError" class="error" aria-live="polite"></p>
       </form>
@@ -69,7 +99,9 @@
         <span id="eventCount">0 events</span>
         <button id="refreshButton" class="link-button" type="button">Refresh</button>
       </div>
+
       <div id="events" class="event-list"></div>
+
       <div id="emptyState" class="empty panel hidden">
         <p>No watched events yet.</p>
         <span>Paste an HTTPS event page URL above to start monitoring it.</span>
@@ -77,7 +109,7 @@
     </section>
 
     <footer>
-      <span>Checks run every 5 minutes.</span>
+      <span>Scheduler wakes every 5 minutes; each event follows its selected refresh rate.</span>
       <span>Independent availability monitor; always confirm on the source event page.</span>
     </footer>
   </main>

@@ -97,8 +97,19 @@
         </div>
         <div id="events" class="event-list"></div>
         <div id="emptyState" class="empty panel hidden">
-          <p>No watched events yet.</p>
+          <p>No active watched events.</p>
           <span>Paste an HTTPS event page URL above to start monitoring it.</span>
+        </div>
+
+        <div id="eventArchiveSection" class="archive-section hidden">
+          <div class="archive-heading">
+            <div>
+              <p class="archive-title">Archived</p>
+              <p class="archive-subtitle">Kept for your records. Archived events are not checked.</p>
+            </div>
+            <span id="archivedEventCount" class="archive-count">0</span>
+          </div>
+          <div id="archivedEvents" class="event-list archived-list"></div>
         </div>
       </section>
 
@@ -125,8 +136,19 @@
         </div>
         <div id="lgsStores" class="event-list"></div>
         <div id="lgsEmptyState" class="empty panel hidden">
-          <p>No watched LGS pages yet.</p>
+          <p>No active watched LGS pages.</p>
           <span>Add a Riftbound Gaming Network store page to watch for newly listed events.</span>
+        </div>
+
+        <div id="lgsArchiveSection" class="archive-section hidden">
+          <div class="archive-heading">
+            <div>
+              <p class="archive-title">Archived</p>
+              <p class="archive-subtitle">Kept for your records. Archived LGS pages are not checked.</p>
+            </div>
+            <span id="archivedLgsCount" class="archive-count">0</span>
+          </div>
+          <div id="archivedLgsStores" class="event-list archived-list"></div>
         </div>
       </section>
     </section>

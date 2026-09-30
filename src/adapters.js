@@ -1,4 +1,5 @@
 import { parseRiftboundEventUrl, fetchRiftboundEvent } from './riftbound.js';
+import { parseRiftboundStoreUrl, fetchRiftboundStore } from './riftbound-store.js';
 import { fetchGenericEvent } from './generic.js';
 import { sha256 } from './utils.js';
 
@@ -40,9 +41,31 @@ export async function normalizeEventUrl(input) {
   };
 }
 
+export function normalizeLgsUrl(input) {
+  let parsed;
+  try {
+    parsed = parseRiftboundStoreUrl(input);
+  } catch (error) {
+    throw new Error(`LGS tracking currently supports Riftbound Gaming Network store pages. ${error.message}`);
+  }
+
+  const url = new URL(parsed.canonicalUrl);
+  return {
+    storeKey: `riftbound:${parsed.storeKey}`,
+    canonicalUrl: parsed.canonicalUrl,
+    adapter: 'riftbound-store',
+    sourceHost: url.hostname,
+  };
+}
+
 export async function fetchEvent(event) {
   if (event.adapter === 'riftbound') return fetchRiftboundEvent(event.event_url);
   return fetchGenericEvent(event.event_url);
+}
+
+export async function fetchLgsStore(store) {
+  if (store.adapter === 'riftbound-store') return fetchRiftboundStore(store.store_url);
+  throw new Error(`Unsupported LGS adapter: ${store.adapter}`);
 }
 
 function tryParseRiftbound(input) {

@@ -12,7 +12,7 @@ Event Watch is **not tied to one event platform**. Users can paste any public HT
 
 - Cloudflare Workers — API, authentication, scheduled checking, and static asset routing
 - Cloudflare D1 — users, sessions, events, subscriptions, and notification history
-- Cloudflare Cron Triggers — checks watched events every five minutes
+- Cloudflare Cron Triggers — scheduler wakes every five minutes; each watch can use its own refresh interval
 - Gmail API — verification and availability emails sent from your Gmail account
 - GitHub Actions — tests and Cloudflare deployment
 - Vanilla HTML/CSS/JS — deliberately small frontend
@@ -22,11 +22,11 @@ Event Watch is **not tied to one event platform**. Users can paste any public HT
 1. A signed-in user pastes an HTTPS event-page URL.
 2. Event Watch canonicalizes the URL and selects an adapter.
 3. The event is stored once even when several users watch it.
-4. The Worker checks active events on the cron schedule.
+4. The Worker wakes every five minutes and checks only subscriptions whose selected refresh interval is due.
 5. Status is classified as `AVAILABLE`, `FULL`, `NOT_OPEN`, `CLOSED`, `UNAVAILABLE`, or `UNKNOWN`.
-6. Email is sent only when an event transitions into `AVAILABLE`.
+6. Email is sent only when that user’s watch transitions into `AVAILABLE`.
 
-For unknown websites the detector intentionally favors avoiding false positives. A page must expose a clear action control such as **Register**, **Book now**, **Get tickets**, **Reserve a spot**, or **Sign up** before it is classified as available. Pages that render registration exclusively after client-side JavaScript, require authentication, block automated requests, or use unusual wording may need a dedicated adapter.
+Each watch can use a 5, 10, 15, or 30 minute interval, or 1, 3, 6, 12, or 24 hours. The dashboard defaults to dark mode and stores the user’s light/dark preference locally in the browser.\n\nFor unknown websites the detector intentionally favors avoiding false positives. A page must expose a clear action control such as **Register**, **Book now**, **Get tickets**, **Reserve a spot**, or **Sign up** before it is classified as available. Pages that render registration exclusively after client-side JavaScript, require authentication, block automated requests, or use unusual wording may need a dedicated adapter.
 
 ## Security notes
 
@@ -94,7 +94,7 @@ The repository includes `.github/workflows/deploy.yml`. Add these repository sec
 - `CLOUDFLARE_API_TOKEN`
 - `CLOUDFLARE_ACCOUNT_ID`
 
-The Cloudflare token needs enough permission to deploy Workers and manage the D1 database used by this app. Pushes to `main` then run tests, apply remote migrations, and deploy.
+The Cloudflare token needs enough permission to deploy Workers and manage the D1 database used by this app. The deployment workflow is currently manual. Run it from GitHub Actions after the Cloudflare secrets are configured.
 
 ## Adding another site-specific adapter
 

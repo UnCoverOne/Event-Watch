@@ -23,11 +23,17 @@ const addError = $('addError');
 const eventsEl = $('events');
 const emptyState = $('emptyState');
 const eventCount = $('eventCount');
+const archivedEventsEl = $('archivedEvents');
+const eventArchiveSection = $('eventArchiveSection');
+const archivedEventCount = $('archivedEventCount');
 const lgsAddForm = $('lgsAddForm');
 const lgsAddError = $('lgsAddError');
 const lgsStoresEl = $('lgsStores');
 const lgsEmptyState = $('lgsEmptyState');
 const lgsCount = $('lgsCount');
+const archivedLgsStoresEl = $('archivedLgsStores');
+const lgsArchiveSection = $('lgsArchiveSection');
+const archivedLgsCount = $('archivedLgsCount');
 const themeToggle = $('themeToggle');
 const themeLabel = $('themeLabel');
 
@@ -218,14 +224,34 @@ async function updateLgsRefreshRate(storeId, minutes, select) {
   }
 }
 
-async function removeEvent(eventId) {
+async function archiveEvent(eventId) {
   await api(`/api/events/${encodeURIComponent(eventId)}`, { method: 'DELETE' });
   await loadEvents();
 }
 
-async function removeLgs(storeId) {
+async function restoreEvent(eventId, button) {
+  button.disabled = true;
+  try {
+    await api(`/api/events/${encodeURIComponent(eventId)}/restore`, { method: 'POST' });
+    await loadEvents();
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function archiveLgs(storeId) {
   await api(`/api/lgs/${encodeURIComponent(storeId)}`, { method: 'DELETE' });
   await loadStores();
+}
+
+async function restoreLgs(storeId, button) {
+  button.disabled = true;
+  try {
+    await api(`/api/lgs/${encodeURIComponent(storeId)}/restore`, { method: 'POST' });
+    await loadStores();
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function checkEvent(eventId, button) {
@@ -263,83 +289,152 @@ async function resendVerification() {
 }
 
 function renderEvents() {
-  eventCount.textContent = `${state.events.length} event${state.events.length === 1 ? '' : 's'}`;
-  emptyState.classList.toggle('hidden', state.events.length !== 0);
+  const activeEvents = state.events.filter((event) => Number(event.active) === 1);
+  const archivedEvents = state.events.filter((event) => Number(event.active) !== 1);
+
+  eventCount.textContent = `${activeEvents.length} event${activeEvents.length === 1 ? '' : 's'}`;
+  emptyState.classList.toggle('hidden', activeEvents.length !== 0);
+  eventArchiveSection.classList.toggle('hidden', archivedEvents.length === 0);
+  archivedEventCount.textContent = archivedEvents.length;
   eventsEl.innerHTML = '';
+  archivedEventsEl.innerHTML = '';
 
-  for (const event of state.events) {
-    const card = document.createElement('article');
-    card.className = 'event-card panel';
-    const capacity = event.capacity != null && event.current_players != null
-      ? `${event.current_players}/${event.capacity} players` : null;
+  for (const event of activeEvents) {
+    eventsEl.appendChild(buildEventCard(event, false));
+  }
 
-    card.innerHTML = `
-      <div class="event-main">
-        <p class="event-title"></p>
-        <div class="event-meta">
-          <span class="status ${statusClassName(event.status)}"><span class="status-dot"></span>${escapeText(formatStatus(event.status))}</span>
-          ${capacity ? `<span>${escapeText(capacity)}</span>` : ''}
-          <span>${escapeText(event.last_checked_at ? `Checked ${timeAgo(event.last_checked_at)}` : 'Not checked yet')}</span>
-          <span>${escapeText(event.next_check_at ? `Next ${relativeFuture(event.next_check_at)}` : 'Check due')}</span>
-          <a href="${escapeAttribute(event.event_url)}" target="_blank" rel="noopener noreferrer">Open event</a>
-        </div>
-        <p class="event-reason">${escapeText(event.status_reason || 'Waiting for the next check.')}</p>
-        ${event.last_error ? `<p class="event-error">Last check error: ${escapeText(event.last_error)}</p>` : ''}
-      </div>
-      <div class="card-controls">
-        <label class="interval-control"><span>Refresh</span><select class="event-interval">${intervalOptions(event.check_interval_minutes, true)}</select></label>
-        <div class="card-actions">
-          <button class="icon-button check" type="button">Check now</button>
-          <button class="icon-button remove" type="button">Remove</button>
-        </div>
-      </div>`;
-
-    card.querySelector('.event-title').textContent = event.title || event.source_host || 'Watched event';
-    card.querySelector('.event-interval').addEventListener('change', (e) => updateRefreshRate(event.event_id, e.currentTarget.value, e.currentTarget));
-    card.querySelector('.check').addEventListener('click', (e) => checkEvent(event.event_id, e.currentTarget));
-    card.querySelector('.remove').addEventListener('click', () => removeEvent(event.event_id));
-    eventsEl.appendChild(card);
+  for (const event of archivedEvents) {
+    archivedEventsEl.appendChild(buildEventCard(event, true));
   }
 }
 
-function renderStores() {
-  lgsCount.textContent = `${state.stores.length} LGS page${state.stores.length === 1 ? '' : 's'}`;
-  lgsEmptyState.classList.toggle('hidden', state.stores.length !== 0);
-  lgsStoresEl.innerHTML = '';
+function buildEventCard(event, archived) {
+  const card = document.createElement('article');
+  card.className = `event-card panel${archived ? ' archived-card' : ''}`;
+  const capacity = event.capacity != null && event.current_players != null
+    ? `${event.current_players}/${event.capacity} players` : null;
 
-  for (const store of state.stores) {
-    const card = document.createElement('article');
-    card.className = 'event-card panel';
-    const known = Number(store.known_event_count || 0);
-    const status = store.last_error ? 'Check error' : (store.initialized_at ? 'Watching' : 'Initializing');
-
+  if (archived) {
     card.innerHTML = `
       <div class="event-main">
         <p class="event-title"></p>
         <div class="event-meta">
-          <span class="store-status"><span class="status-dot"></span>${escapeText(status)}</span>
+          <span class="archive-badge">Archived</span>
+          <span class="status ${statusClassName(event.status)}"><span class="status-dot"></span>${escapeText(formatStatus(event.status))}</span>
+          ${capacity ? `<span>${escapeText(capacity)}</span>` : ''}
+          <span>${escapeText(event.last_checked_at ? `Last checked ${timeAgo(event.last_checked_at)}` : 'Never checked')}</span>
+          <a href="${escapeAttribute(event.event_url)}" target="_blank" rel="noopener noreferrer">Open event</a>
+        </div>
+        <p class="event-reason">Archived for record keeping. Scheduled checks are paused.</p>
+      </div>
+      <div class="card-controls archive-controls">
+        <button class="icon-button restore" type="button">Restore</button>
+      </div>`;
+    card.querySelector('.event-title').textContent = event.title || event.source_host || 'Watched event';
+    card.querySelector('.restore').addEventListener('click', (e) => restoreEvent(event.event_id, e.currentTarget));
+    return card;
+  }
+
+  card.innerHTML = `
+    <div class="event-main">
+      <p class="event-title"></p>
+      <div class="event-meta">
+        <span class="status ${statusClassName(event.status)}"><span class="status-dot"></span>${escapeText(formatStatus(event.status))}</span>
+        ${capacity ? `<span>${escapeText(capacity)}</span>` : ''}
+        <span>${escapeText(event.last_checked_at ? `Checked ${timeAgo(event.last_checked_at)}` : 'Not checked yet')}</span>
+        <span>${escapeText(event.next_check_at ? `Next ${relativeFuture(event.next_check_at)}` : 'Check due')}</span>
+        <a href="${escapeAttribute(event.event_url)}" target="_blank" rel="noopener noreferrer">Open event</a>
+      </div>
+      <p class="event-reason">${escapeText(event.status_reason || 'Waiting for the next check.')}</p>
+      ${event.last_error ? `<p class="event-error">Last check error: ${escapeText(event.last_error)}</p>` : ''}
+    </div>
+    <div class="card-controls">
+      <label class="interval-control"><span>Refresh</span><select class="event-interval">${intervalOptions(event.check_interval_minutes, true)}</select></label>
+      <div class="card-actions">
+        <button class="icon-button check" type="button">Check now</button>
+        <button class="icon-button archive" type="button">Archive</button>
+      </div>
+    </div>`;
+
+  card.querySelector('.event-title').textContent = event.title || event.source_host || 'Watched event';
+  card.querySelector('.event-interval').addEventListener('change', (e) => updateRefreshRate(event.event_id, e.currentTarget.value, e.currentTarget));
+  card.querySelector('.check').addEventListener('click', (e) => checkEvent(event.event_id, e.currentTarget));
+  card.querySelector('.archive').addEventListener('click', () => archiveEvent(event.event_id));
+  return card;
+}
+
+function renderStores() {
+  const activeStores = state.stores.filter((store) => Number(store.active) === 1);
+  const archivedStores = state.stores.filter((store) => Number(store.active) !== 1);
+
+  lgsCount.textContent = `${activeStores.length} LGS page${activeStores.length === 1 ? '' : 's'}`;
+  lgsEmptyState.classList.toggle('hidden', activeStores.length !== 0);
+  lgsArchiveSection.classList.toggle('hidden', archivedStores.length === 0);
+  archivedLgsCount.textContent = archivedStores.length;
+  lgsStoresEl.innerHTML = '';
+  archivedLgsStoresEl.innerHTML = '';
+
+  for (const store of activeStores) {
+    lgsStoresEl.appendChild(buildLgsCard(store, false));
+  }
+
+  for (const store of archivedStores) {
+    archivedLgsStoresEl.appendChild(buildLgsCard(store, true));
+  }
+}
+
+function buildLgsCard(store, archived) {
+  const card = document.createElement('article');
+  card.className = `event-card panel${archived ? ' archived-card' : ''}`;
+  const known = Number(store.known_event_count || 0);
+
+  if (archived) {
+    card.innerHTML = `
+      <div class="event-main">
+        <p class="event-title"></p>
+        <div class="event-meta">
+          <span class="archive-badge">Archived</span>
           <span>${known} known event${known === 1 ? '' : 's'}</span>
-          <span>${escapeText(store.last_checked_at ? `Checked ${timeAgo(store.last_checked_at)}` : 'Not checked yet')}</span>
-          <span>${escapeText(store.next_check_at ? `Next ${relativeFuture(store.next_check_at)}` : 'Check due')}</span>
+          <span>${escapeText(store.last_checked_at ? `Last checked ${timeAgo(store.last_checked_at)}` : 'Never checked')}</span>
           <a href="${escapeAttribute(store.store_url)}" target="_blank" rel="noopener noreferrer">Open LGS</a>
         </div>
-        <p class="event-reason">New event listings on this page will trigger an alert.</p>
-        ${store.last_error ? `<p class="event-error">Last check error: ${escapeText(store.last_error)}</p>` : ''}
+        <p class="event-reason">Archived for record keeping. New event checks are paused.</p>
       </div>
-      <div class="card-controls">
-        <label class="interval-control"><span>Refresh</span><select class="lgs-interval">${intervalOptions(store.check_interval_minutes, true)}</select></label>
-        <div class="card-actions">
-          <button class="icon-button check" type="button">Check now</button>
-          <button class="icon-button remove" type="button">Remove</button>
-        </div>
+      <div class="card-controls archive-controls">
+        <button class="icon-button restore" type="button">Restore</button>
       </div>`;
-
     card.querySelector('.event-title').textContent = store.title || store.source_host || 'Watched LGS';
-    card.querySelector('.lgs-interval').addEventListener('change', (e) => updateLgsRefreshRate(store.store_id, e.currentTarget.value, e.currentTarget));
-    card.querySelector('.check').addEventListener('click', (e) => checkLgs(store.store_id, e.currentTarget));
-    card.querySelector('.remove').addEventListener('click', () => removeLgs(store.store_id));
-    lgsStoresEl.appendChild(card);
+    card.querySelector('.restore').addEventListener('click', (e) => restoreLgs(store.store_id, e.currentTarget));
+    return card;
   }
+
+  const status = store.last_error ? 'Check error' : (store.initialized_at ? 'Watching' : 'Initializing');
+  card.innerHTML = `
+    <div class="event-main">
+      <p class="event-title"></p>
+      <div class="event-meta">
+        <span class="store-status"><span class="status-dot"></span>${escapeText(status)}</span>
+        <span>${known} known event${known === 1 ? '' : 's'}</span>
+        <span>${escapeText(store.last_checked_at ? `Checked ${timeAgo(store.last_checked_at)}` : 'Not checked yet')}</span>
+        <span>${escapeText(store.next_check_at ? `Next ${relativeFuture(store.next_check_at)}` : 'Check due')}</span>
+        <a href="${escapeAttribute(store.store_url)}" target="_blank" rel="noopener noreferrer">Open LGS</a>
+      </div>
+      <p class="event-reason">New event listings on this page will trigger an alert.</p>
+      ${store.last_error ? `<p class="event-error">Last check error: ${escapeText(store.last_error)}</p>` : ''}
+    </div>
+    <div class="card-controls">
+      <label class="interval-control"><span>Refresh</span><select class="lgs-interval">${intervalOptions(store.check_interval_minutes, true)}</select></label>
+      <div class="card-actions">
+        <button class="icon-button check" type="button">Check now</button>
+        <button class="icon-button archive" type="button">Archive</button>
+      </div>
+    </div>`;
+
+  card.querySelector('.event-title').textContent = store.title || store.source_host || 'Watched LGS';
+  card.querySelector('.lgs-interval').addEventListener('change', (e) => updateLgsRefreshRate(store.store_id, e.currentTarget.value, e.currentTarget));
+  card.querySelector('.check').addEventListener('click', (e) => checkLgs(store.store_id, e.currentTarget));
+  card.querySelector('.archive').addEventListener('click', () => archiveLgs(store.store_id));
+  return card;
 }
 
 function fillIntervalSelect(select) {

@@ -69,3 +69,17 @@ test('leaves host LGS empty if only address-like text follows the event date', (
   assert.equal(result.eventDate, 'Jul 8, 2026');
   assert.equal(result.hostLgs, null);
 });
+
+
+test('extracts LGS when store name and address are concatenated in page text', () => {
+  const result = parseRiftboundHtml(`
+    <html><body>
+      <h1>Riftbound Vendetta Summoner Skirmish @ Taps Games</h1>
+      <div>Sep 19, 2026</div>
+      <div>Taps Games2854 Calgary Trl NW, Edmonton, AB T6J 6V7, Canada</div>
+      <div>Starts at 10:00 AM (MDT)</div>
+    </body></html>`);
+
+  assert.equal(result.eventDate, 'Sep 19, 2026');
+  assert.equal(result.hostLgs, 'Taps Games');
+});

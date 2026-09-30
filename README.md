@@ -1,6 +1,6 @@
 # Event Watch
 
-A minimalist Cloudflare-native service that watches event pages and emails users when registration, booking, tickets, or places appear to become available.
+A minimalist Cloudflare-native service that watches event pages and local game store listings, then emails users when registration becomes available or a watched LGS adds a new event.
 
 Event Watch is **not tied to one event platform**. Users can paste any public HTTPS event page. The checker uses a site-adapter architecture:
 
@@ -24,9 +24,9 @@ Event Watch is **not tied to one event platform**. Users can paste any public HT
 3. The event is stored once even when several users watch it.
 4. The Worker wakes every five minutes and checks only subscriptions whose selected refresh interval is due.
 5. Status is classified as `AVAILABLE`, `FULL`, `NOT_OPEN`, `CLOSED`, `UNAVAILABLE`, or `UNKNOWN`.
-6. Email is sent only when that user’s watch transitions into `AVAILABLE`.
+6. Alerts are queued during the scheduler run and grouped by user. One digest email is sent after the refresh window, even if several watched items changed.\n7. LGS watches silently record the current listing as a baseline, then alert only for event IDs that appear later.
 
-Each watch can use a 5, 10, 15, or 30 minute interval, or 1, 3, 6, 12, or 24 hours. The dashboard defaults to dark mode and stores the user’s light/dark preference locally in the browser.\n\nFor unknown websites the detector intentionally favors avoiding false positives. A page must expose a clear action control such as **Register**, **Book now**, **Get tickets**, **Reserve a spot**, or **Sign up** before it is classified as available. Pages that render registration exclusively after client-side JavaScript, require authentication, block automated requests, or use unusual wording may need a dedicated adapter.
+Each event or LGS watch can use a 5, 10, 15, or 30 minute interval, or 1, 3, 6, 12, or 24 hours. The dashboard defaults to dark mode and stores the user’s light/dark preference locally in the browser. Event Watch batches all alerts discovered in the same scheduler run into one email per user.\n\nFor unknown websites the detector intentionally favors avoiding false positives. A page must expose a clear action control such as **Register**, **Book now**, **Get tickets**, **Reserve a spot**, or **Sign up** before it is classified as available. Pages that render registration exclusively after client-side JavaScript, require authentication, block automated requests, or use unusual wording may need a dedicated adapter.
 
 ## Security notes
 
@@ -115,3 +115,16 @@ Prefer structured public APIs or stable server-rendered markup when a platform p
 ## Current limitations
 
 Event Watch performs ordinary HTTP fetching from a Cloudflare Worker; it is not a headless browser. Sites whose availability state only appears after running JavaScript may return `UNAVAILABLE` or an error until a dedicated API/adapter is added. This is intentional: guessing availability would create noisy alerts.
+
+
+## LGS watch pages
+
+The **LGS pages** dashboard tab currently supports Riftbound Gaming Network store URLs such as:
+
+```
+https://locator.riftbound.uvsgames.com/stores/<store-uuid>
+```
+
+When a store is first added, Event Watch records the event IDs already present without notifying the user. On later checks, newly observed `/events/<id>` links are treated as new LGS events and queued for the next digest email.
+
+The database objects for this feature are created by `migrations/0003_lgs_watch_and_alert_queue.sql`. The same migration adds the generic alert queue used to batch event-availability and LGS-new-event notifications.

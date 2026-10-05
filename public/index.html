@@ -4,6 +4,12 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="theme-color" content="#0c0d0f" />
+  <meta name="description" content="Watch event pages and local game store listings, then get alerted when availability changes." />
+  <meta name="application-name" content="Event Watch" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Event Watch" />
   <title>Event Watch</title>
   <script>
     (() => {
@@ -13,6 +19,9 @@
         ?.setAttribute('content', theme === 'dark' ? '#0c0d0f' : '#f4f4f1');
     })();
   </script>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="/icons/icon-192.png" />
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>

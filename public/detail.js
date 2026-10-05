@@ -4,7 +4,7 @@ const INTERVALS = [
   [30, 'Every 30 minutes'], [60, 'Every hour'], [180, 'Every 3 hours'],
   [360, 'Every 6 hours'], [720, 'Every 12 hours'], [1440, 'Every day'],
 ];
-const BUILD_ID = '2026-10-06-lgs-event-list';
+const BUILD_ID = '2026-10-06-riftbound-hydration';
 
 const params = new URL(location.href).searchParams;
 const kind = params.get('kind');

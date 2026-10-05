@@ -4,7 +4,7 @@ const INTERVALS = [
   [30, 'Every 30 minutes'], [60, 'Every hour'], [180, 'Every 3 hours'],
   [360, 'Every 6 hours'], [720, 'Every 12 hours'], [1440, 'Every day'],
 ];
-const BUILD_ID = '2026-10-06-push-notifications';
+const BUILD_ID = '2026-10-06-lgs-event-list';
 
 const params = new URL(location.href).searchParams;
 const kind = params.get('kind');
@@ -38,6 +38,7 @@ async function init() {
       const item = (data.stores || []).find((entry) => entry.store_id === id);
       if (!item) return renderMissing('This LGS watch could not be found.');
       renderLgs(item);
+      await loadLgsEvents(item.store_id);
     }
   } catch (error) {
     renderMissing(error.message || 'Unable to load this watch.');
@@ -151,6 +152,12 @@ function renderLgs(item) {
       </aside>
     </div>
 
+    <section class="panel detail-section lgs-events-section" aria-labelledby="lgsEventsHeading">
+      <div class="lgs-events-heading"><h2 id="lgsEventsHeading">Events at this LGS</h2><button id="refreshLgsEvents" class="link-button" type="button">Refresh events</button></div>
+      <p id="lgsEventsStatus" class="muted" role="status" aria-live="polite">Loading store events…</p>
+      <div id="lgsEventList" class="lgs-event-list"></div>
+    </section>
+
     <section class="panel detail-section detail-technical">
       <h2>Watch details</h2>
       <div class="detail-facts">
@@ -166,6 +173,7 @@ function renderLgs(item) {
     </section>`;
 
   bindActions('lgs', item, archived);
+  $('refreshLgsEvents').addEventListener('click', () => loadLgsEvents(item.store_id));
 }
 
 function activeControls(type, selected) {
@@ -363,4 +371,27 @@ function registerServiceWorker() {
   navigator.serviceWorker.register(workerUrl, { scope: '/', updateViaCache: 'none' })
     .then((registration) => registration.update())
     .catch(() => {});
+}
+
+
+async function loadLgsEvents(storeId) {
+  const button = $('refreshLgsEvents');
+  const status = $('lgsEventsStatus');
+  const list = $('lgsEventList');
+  button.disabled = true;
+  status.textContent = 'Loading store events…';
+  try {
+    const data = await api(`/api/lgs/${encodeURIComponent(storeId)}/events`);
+    // The detail view may have been refreshed while this request was in flight.
+    if ($('lgsEventList') !== list) return;
+    const events = data.events || [];
+    status.textContent = data.warning || (events.length ? `${events.length} ${events.length === 1 ? 'event' : 'events'} currently listed at this store.` : 'No events are currently listed at this store.');
+    list.innerHTML = events.map(event => `
+      <a class="lgs-listed-event" href="${escapeAttribute(event.event_url)}" target="_blank" rel="noopener noreferrer">
+        <span><strong>${escapeText(event.title || `Riftbound event #${event.event_key}`)}</strong><small>Event #${escapeText(event.event_key)}</small></span>
+        <span class="lgs-event-open">Open event ↗</span>
+      </a>`).join('');
+  } catch (error) {
+    status.textContent = error.message || 'Unable to load store events. Please try again.';
+  } finally { button.disabled = false; }
 }

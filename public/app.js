@@ -589,7 +589,7 @@ function escapeText(value) {
 function escapeAttribute(value) { return escapeText(value); }
 
 
-const EVENT_WATCH_BUILD = '2026-10-06-push-notifications';
+const EVENT_WATCH_BUILD = '2026-10-06-lgs-event-list';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

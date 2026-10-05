@@ -159,3 +159,15 @@ footer { border-top: 1px solid var(--line); min-height: 72px; display: flex; ali
 .notification-option { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 20px; padding: 20px 0; }
 .notification-option small { display: block; margin-top: 6px; line-height: 1.5; opacity: .7; }
 .notification-option input { width: 22px; height: 22px; flex: 0 0 22px; accent-color: #6eae86; }
+
+.lgs-events-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+.lgs-events-heading h2 { margin: 0; }
+.lgs-events-section > .muted { font-size: 13px; line-height: 1.5; }
+.lgs-event-list { display: grid; gap: 10px; }
+.lgs-listed-event { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px; border: 1px solid var(--line); border-radius: 10px; text-decoration: none; background: var(--surface-2); }
+.lgs-listed-event:hover, .lgs-listed-event:focus-visible { border-color: var(--accent); }
+.lgs-listed-event > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.lgs-listed-event strong { display: block; font-size: 15px; line-height: 1.4; }
+.lgs-listed-event small { display: block; margin-top: 6px; color: var(--muted); }
+.lgs-event-open { flex-shrink: 0; font-size: 12px; color: var(--muted); }
+@media (max-width: 480px) { .lgs-listed-event { flex-direction: column; align-items: flex-start; gap: 10px; } }

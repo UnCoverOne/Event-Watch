@@ -11,7 +11,7 @@ import {
   verifyEmailToken,
 } from './auth.js';
 import { checkOneEvent, checkOneLgs, flushAlertQueue } from './checker.js';
-import { normalizeEventUrl, normalizeLgsUrl } from './adapters.js';
+import { normalizeEventUrl, normalizeLgsUrl, fetchLgsStore } from './adapters.js';
 import { normalizeCheckInterval, nextCheckAt } from './schedule.js';
 import { HttpError, json, nowIso, readJson, uuid } from './utils.js';
 
@@ -192,6 +192,34 @@ export async function handleApi(request, env) {
       ORDER BY sub.active DESC, sub.created_at DESC
     `).bind(user.id).all();
     return json({ stores: rows.results || [] });
+  }
+
+  const lgsEventsMatch = url.pathname.match(/^\/api\/lgs\/([^/]+)\/events$/);
+  if (method === 'GET' && lgsEventsMatch) {
+    const user = await requireUser(request, env);
+    const store = await env.DB.prepare(`
+      SELECT store.*, sub.id AS subscription_id
+      FROM lgs_stores store JOIN lgs_subscriptions sub ON sub.store_id = store.id
+      WHERE sub.user_id = ? AND store.id = ?
+    `).bind(user.id, decodeURIComponent(lgsEventsMatch[1])).first();
+    if (!store) throw new HttpError(404, 'This LGS watch could not be found.');
+    const saved = (await env.DB.prepare(`
+      SELECT event_key, event_url, title, first_seen_at
+      FROM lgs_subscription_events WHERE subscription_id = ?
+      ORDER BY first_seen_at DESC, event_key DESC
+    `).bind(store.subscription_id).all()).results || [];
+    try {
+      // Reading a listing must not change the monitoring baseline or suppress alerts.
+      const snapshot = await fetchLgsStore(store);
+      const savedTitles = new Map(saved.map(event => [event.event_key, event.title]));
+      return json({ events: snapshot.events.map(event => ({
+        event_key: event.eventKey, event_url: event.eventUrl,
+        title: event.title || savedTitles.get(event.eventKey) || `Riftbound event #${event.eventKey}`,
+      })), source: 'live', fetchedAt: nowIso() });
+    } catch {
+      return json({ events: saved, source: 'saved', fetchedAt: store.last_checked_at,
+        warning: 'The current store listing could not be loaded. Showing events saved from previous checks.' });
+    }
   }
 
   if (method === 'POST' && url.pathname === '/api/lgs') {

@@ -35,6 +35,7 @@ export async function fetchRiftboundStore(storeUrl) {
       'Cache-Control': 'no-cache',
     },
     redirect: 'follow',
+    signal: AbortSignal.timeout(15000),
   });
 
   if (!response.ok) throw new Error(`Riftbound returned HTTP ${response.status}`);

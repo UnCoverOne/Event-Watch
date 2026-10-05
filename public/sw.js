@@ -61,6 +61,8 @@ self.addEventListener('fetch', (event) => {
     url.pathname === '/manifest.webmanifest' ||
     url.pathname === '/styles.css' ||
     url.pathname === '/app.js' ||
+    url.pathname === '/detail.js' ||
+    url.pathname === '/detail.html' ||
     url.pathname.startsWith('/icons/');
 
   if (isStaticAsset) {

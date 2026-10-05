@@ -352,9 +352,11 @@ function buildEventCard(event, archived) {
           <button class="icon-button delete danger-button" type="button">Delete</button>
         </div>
       </div>`;
-    card.querySelector('.event-title').textContent = event.title || event.source_host || 'Watched event';
+    const title = event.title || event.source_host || 'Watched event';
+    card.querySelector('.event-title').textContent = title;
     card.querySelector('.restore').addEventListener('click', (e) => restoreEvent(event.event_id, e.currentTarget));
     card.querySelector('.delete').addEventListener('click', () => deleteEvent(event.event_id));
+    attachDetailNavigation(card, 'event', event.event_id, title);
     return card;
   }
 
@@ -384,11 +386,13 @@ function buildEventCard(event, archived) {
       </div>
     </div>`;
 
-  card.querySelector('.event-title').textContent = event.title || event.source_host || 'Watched event';
+  const title = event.title || event.source_host || 'Watched event';
+  card.querySelector('.event-title').textContent = title;
   card.querySelector('.event-interval').addEventListener('change', (e) => updateRefreshRate(event.event_id, e.currentTarget.value, e.currentTarget));
   card.querySelector('.check').addEventListener('click', (e) => checkEvent(event.event_id, e.currentTarget));
   card.querySelector('.archive').addEventListener('click', () => archiveEvent(event.event_id));
   card.querySelector('.delete').addEventListener('click', () => deleteEvent(event.event_id));
+  attachDetailNavigation(card, 'event', event.event_id, title);
   return card;
 }
 
@@ -453,9 +457,11 @@ function buildLgsCard(store, archived) {
           <button class="icon-button delete danger-button" type="button">Delete</button>
         </div>
       </div>`;
-    card.querySelector('.event-title').textContent = store.title || store.source_host || 'Watched LGS';
+    const title = store.title || store.source_host || 'Watched LGS';
+    card.querySelector('.event-title').textContent = title;
     card.querySelector('.restore').addEventListener('click', (e) => restoreLgs(store.store_id, e.currentTarget));
     card.querySelector('.delete').addEventListener('click', () => deleteLgs(store.store_id));
+    attachDetailNavigation(card, 'lgs', store.store_id, title);
     return card;
   }
 
@@ -482,12 +488,37 @@ function buildLgsCard(store, archived) {
       </div>
     </div>`;
 
-  card.querySelector('.event-title').textContent = store.title || store.source_host || 'Watched LGS';
+  const title = store.title || store.source_host || 'Watched LGS';
+  card.querySelector('.event-title').textContent = title;
   card.querySelector('.lgs-interval').addEventListener('change', (e) => updateLgsRefreshRate(store.store_id, e.currentTarget.value, e.currentTarget));
   card.querySelector('.check').addEventListener('click', (e) => checkLgs(store.store_id, e.currentTarget));
   card.querySelector('.archive').addEventListener('click', () => archiveLgs(store.store_id));
   card.querySelector('.delete').addEventListener('click', () => deleteLgs(store.store_id));
+  attachDetailNavigation(card, 'lgs', store.store_id, title);
   return card;
+}
+
+function attachDetailNavigation(card, kind, id, title) {
+  const openDetail = () => {
+    const params = new URLSearchParams({ kind, id });
+    location.href = `/detail.html?${params.toString()}`;
+  };
+
+  card.classList.add('clickable-card');
+  card.tabIndex = 0;
+  card.setAttribute('role', 'link');
+  card.setAttribute('aria-label', `Open details for ${title}`);
+
+  card.addEventListener('click', (event) => {
+    if (event.target.closest('a, button, select, input, label')) return;
+    openDetail();
+  });
+
+  card.addEventListener('keydown', (event) => {
+    if (event.target !== card || (event.key !== 'Enter' && event.key !== ' ')) return;
+    event.preventDefault();
+    openDetail();
+  });
 }
 
 function fillIntervalSelect(select) {
@@ -551,7 +582,7 @@ function escapeText(value) {
 function escapeAttribute(value) { return escapeText(value); }
 
 
-const EVENT_WATCH_BUILD = '2026-10-06-pwa3';
+const EVENT_WATCH_BUILD = '2026-10-06-detail-pages';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

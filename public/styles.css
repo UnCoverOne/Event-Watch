@@ -102,3 +102,52 @@ footer { border-top: 1px solid var(--line); min-height: 72px; display: flex; ali
   .card-actions { justify-content: flex-start; } footer { align-items: flex-start; flex-direction: column; justify-content: center; padding: 18px 0; }
 }
 @media (max-width: 480px) { .event-activity { grid-template-columns: 1fr; gap: 3px; margin-top: 8px; } .event-activity a { justify-self: start; } .top-actions { gap: 10px; } .theme-toggle #themeLabel { display: none; } .theme-toggle { padding: 8px 10px; } .watch-tabs { width: 100%; } .watch-tab { flex: 1; } }
+
+
+/* Click-through dashboard cards */
+.clickable-card { cursor: pointer; transition: border-color .16s ease, transform .16s ease, box-shadow .16s ease, opacity .16s ease; }
+.clickable-card:hover { border-color: var(--line-strong); transform: translateY(-1px); }
+.clickable-card:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 38%, transparent); outline-offset: 3px; }
+.clickable-card a, .clickable-card button, .clickable-card select, .clickable-card label { cursor: auto; }
+.clickable-card a, .clickable-card button, .clickable-card select { cursor: pointer; }
+
+/* Detail page */
+.detail-shell { width: min(920px, calc(100% - 32px)); margin: 0 auto; min-height: 100vh; display: flex; flex-direction: column; }
+.detail-main { flex: 1; padding: 42px 0 72px; }
+.detail-back { display: inline-flex; align-items: center; gap: 7px; margin-bottom: 26px; color: var(--muted); font-size: 13px; font-weight: 750; text-decoration: none; }
+.detail-back:hover { color: var(--text); }
+.detail-hero { display: grid; gap: 12px; margin-bottom: 24px; }
+.detail-hero-row { display: flex; gap: 18px; align-items: flex-start; justify-content: space-between; }
+.detail-title { margin: 0; max-width: 760px; font-size: clamp(36px, 7vw, 64px); letter-spacing: -.055em; line-height: .98; overflow-wrap: anywhere; }
+.detail-source-link { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 10px 13px; color: var(--text); font-size: 12px; font-weight: 750; text-decoration: none; }
+.detail-source-link:hover { border-color: var(--line-strong); }
+.detail-grid { display: grid; grid-template-columns: 1.25fr .75fr; gap: 14px; }
+.detail-section { padding: 20px; }
+.detail-section h2 { margin: 0 0 16px; font-size: 14px; letter-spacing: -.01em; }
+.detail-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; overflow: hidden; border: 1px solid var(--line); border-radius: 11px; background: var(--line); }
+.detail-fact { min-width: 0; padding: 13px 14px; background: var(--surface-2); }
+.detail-fact-label { display: block; margin-bottom: 5px; color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.detail-fact-value { display: block; color: var(--text); font-size: 13px; font-weight: 720; overflow-wrap: anywhere; }
+.detail-status-line { display: flex; align-items: center; gap: 9px; }
+.detail-copy { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
+.detail-error { margin: 14px 0 0; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--danger) 50%, var(--line)); border-radius: 10px; color: var(--danger); background: color-mix(in srgb, var(--danger) 6%, var(--surface)); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.detail-actions { display: grid; gap: 12px; }
+.detail-actions .interval-control { grid-template-columns: 1fr; }
+.detail-actions .card-actions { justify-content: stretch; flex-wrap: wrap; }
+.detail-actions .card-actions button { flex: 1 1 120px; }
+.detail-technical { margin-top: 14px; }
+.detail-technical .detail-facts { grid-template-columns: 1fr; }
+.detail-empty { padding: 42px 24px; text-align: center; }
+.detail-empty h1 { font-size: 32px; margin-bottom: 12px; }
+.detail-empty p { color: var(--muted); }
+.detail-loading { padding: 42px 0; color: var(--muted); }
+@media (max-width: 760px) {
+  .detail-shell { width: min(100% - 24px, 920px); }
+  .detail-main { padding-top: 26px; }
+  .detail-hero-row { flex-direction: column; }
+  .detail-source-link { align-self: flex-start; }
+  .detail-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 520px) {
+  .detail-facts { grid-template-columns: 1fr; }
+}

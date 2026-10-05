@@ -551,8 +551,17 @@ function escapeText(value) {
 function escapeAttribute(value) { return escapeText(value); }
 
 
+const EVENT_WATCH_BUILD = '2026-10-06-pwa3';
+
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })\n      .then((registration) => registration.update().catch(() => {}))\n      .catch(() => {});
+    const workerUrl = `/sw.js?build=${encodeURIComponent(EVENT_WATCH_BUILD)}`;
+    navigator.serviceWorker
+      .register(workerUrl, { scope: '/', updateViaCache: 'none' })
+      .then((registration) => registration.update())
+      .catch(() => {
+        // PWA support is progressive enhancement; the web app remains usable
+        // even if the browser has service workers disabled.
+      });
   });
 }

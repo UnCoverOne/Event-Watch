@@ -582,7 +582,7 @@ function escapeText(value) {
 function escapeAttribute(value) { return escapeText(value); }
 
 
-const EVENT_WATCH_BUILD = '2026-10-06-detail-pages';
+const EVENT_WATCH_BUILD = '2026-10-06-valid-pwa-icons';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

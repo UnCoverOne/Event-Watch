@@ -82,3 +82,26 @@ self.addEventListener('fetch', (event) => {
     );
   }
 });
+
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try { payload = event.data?.json() || {}; } catch { /* Show a visible fallback. */ }
+  event.waitUntil(self.registration.showNotification(payload.title || 'Event Watch update', {
+    body: payload.body || 'One of your watched pages has changed.',
+    icon: '/icons/icon-192.png?v=2', badge: '/icons/icon-192.png?v=2',
+    tag: payload.tag || 'event-watch-update',
+    data: { url: payload.url || '/' },
+  }));
+});
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil((async () => {
+    const target = new URL(event.notification.data?.url || '/', self.location.origin);
+    if (target.origin !== self.location.origin) return;
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of windows) {
+      if ('navigate' in client) { await client.navigate(target.href); await client.focus(); return; }
+    }
+    await self.clients.openWindow(target.href);
+  })());
+});

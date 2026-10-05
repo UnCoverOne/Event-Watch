@@ -53,6 +53,11 @@ themeToggle.addEventListener('click', toggleTheme);
 fillIntervalSelect($('checkInterval'));
 fillIntervalSelect($('lgsCheckInterval'));
 init();
+$('settingsButton').addEventListener('click', openNotificationSettings);
+$('closeSettings').addEventListener('click', () => $('notificationSettings').close());
+$('emailNotifications').addEventListener('change', saveEmailNotifications);
+$('pushNotifications').addEventListener('change', savePushNotifications);
+$('testPush').addEventListener('click', testPush);
 
 async function init() {
   syncThemeUi();
@@ -122,6 +127,7 @@ async function onAuthSubmit(event) {
 }
 
 async function onLogout() {
+  await disableDevicePush();
   await api('/api/auth/logout', { method: 'POST' }).catch(() => {});
   state.user = null;
   state.events = [];
@@ -133,6 +139,7 @@ function renderSession() {
   const signedIn = Boolean(state.user);
   authView.classList.toggle('hidden', signedIn);
   dashboardView.classList.toggle('hidden', !signedIn);
+  $('settingsButton').classList.toggle('hidden', !signedIn);
   logoutButton.classList.toggle('hidden', !signedIn);
   if (!signedIn) return;
   accountLine.textContent = state.user.email;
@@ -582,7 +589,7 @@ function escapeText(value) {
 function escapeAttribute(value) { return escapeText(value); }
 
 
-const EVENT_WATCH_BUILD = '2026-10-06-valid-pwa-icons';
+const EVENT_WATCH_BUILD = '2026-10-06-push-notifications';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
@@ -595,4 +602,73 @@ if ('serviceWorker' in navigator) {
         // even if the browser has service workers disabled.
       });
   });
+}
+
+
+let notificationConfig = null;
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+async function deviceSubscription() {
+  if (!pushSupported()) return null;
+  const registration = await navigator.serviceWorker.getRegistration('/');
+  return registration ? registration.pushManager.getSubscription() : null;
+}
+async function openNotificationSettings() {
+  notificationConfig = null;
+  $('notificationSettings').showModal();
+  $('notificationStatus').textContent = 'Loading settings…';
+  $('emailNotifications').disabled = true; $('pushNotifications').disabled = true;
+  try {
+    notificationConfig = await api('/api/settings/notifications');
+    $('emailNotifications').checked = notificationConfig.emailEnabled;
+    const subscription = await deviceSubscription();
+    const status = subscription ? await api(`/api/push/subscriptions?endpoint=${encodeURIComponent(subscription.endpoint)}`) : { enabled: false };
+    $('pushNotifications').checked = status.enabled && Notification.permission === 'granted';
+    $('testPush').disabled = !$('pushNotifications').checked;
+    $('notificationStatus').textContent = !pushSupported() ? 'Push notifications are not supported by this browser.' : Notification.permission === 'denied' ? 'Notifications are blocked. Allow them in your browser’s site settings, then reopen these settings.' : !notificationConfig.emailVerified && notificationConfig.emailEnabled ? 'Verify your email to receive email alerts. Push can be enabled independently.' : '';
+  } catch (error) { $('notificationStatus').textContent = error.message; }
+  finally { $('emailNotifications').disabled = !notificationConfig; $('pushNotifications').disabled = !notificationConfig || !pushSupported() || Notification.permission === 'denied'; }
+}
+async function saveEmailNotifications() {
+  const input = $('emailNotifications'); const desired = input.checked; input.disabled = true;
+  try {
+    await api('/api/settings/notifications', { method: 'PATCH', body: { emailEnabled: desired } });
+    $('notificationStatus').textContent = desired ? 'Email notifications enabled.' : 'Email notifications disabled.';
+  } catch (error) { input.checked = !desired; $('notificationStatus').textContent = error.message; }
+  finally { input.disabled = false; }
+}
+async function disableDevicePush() {
+  const subscription = await deviceSubscription();
+  if (!subscription) return;
+  await api('/api/push/subscriptions', { method: 'DELETE', body: { endpoint: subscription.endpoint } });
+  await subscription.unsubscribe();
+}
+async function savePushNotifications() {
+  const input = $('pushNotifications'); const desired = input.checked; input.disabled = true;
+  try {
+    if (desired) {
+      // Request directly from this user gesture, before other asynchronous work.
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') throw new Error('Notification permission was not granted.');
+      const registration = await Promise.race([navigator.serviceWorker.ready, new Promise((_, reject) => setTimeout(() => reject(new Error('Push is not ready. Reload the app and try again.')), 10000))]);
+      let subscription = await registration.pushManager.getSubscription();
+      if (!subscription) {
+        const key = notificationConfig.publicKey.replace(/-/g, '+').replace(/_/g, '/');
+        const applicationServerKey = Uint8Array.from(atob(key + '='.repeat((4 - key.length % 4) % 4)), c => c.charCodeAt(0));
+        subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey });
+      }
+      await api('/api/push/subscriptions', { method: 'POST', body: { subscription: subscription.toJSON() } });
+    } else { await disableDevicePush(); }
+    $('notificationStatus').textContent = desired ? 'Push notifications enabled on this device.' : 'Push notifications disabled on this device.';
+  } catch (error) { input.checked = !desired; $('notificationStatus').textContent = error.message; }
+  finally { input.disabled = Notification.permission === 'denied'; $('testPush').disabled = !input.checked; }
+}
+async function testPush() {
+  $('testPush').disabled = true;
+  try {
+    const subscription = await deviceSubscription();
+    if (!subscription) throw new Error('Enable push on this device first.');
+    await api('/api/push/test', { method: 'POST', body: { endpoint: subscription.endpoint } });
+    $('notificationStatus').textContent = 'Test sent. Check your device notifications.';
+  } catch (error) { $('notificationStatus').textContent = error.message; }
+  finally { $('testPush').disabled = !$('pushNotifications').checked; }
 }

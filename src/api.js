@@ -1,3 +1,4 @@
+import { handleNotifications } from './notifications.js';
 import {
   assertSameOrigin,
   clearSessionCookie,
@@ -30,6 +31,10 @@ export async function handleApi(request, env) {
   }
 
   if (['POST', 'DELETE', 'PATCH'].includes(method)) assertSameOrigin(request);
+
+  if (url.pathname === '/api/settings/notifications' || url.pathname.startsWith('/api/push/')) {
+    return handleNotifications(request, env);
+  }
 
   if (method === 'POST' && url.pathname === '/api/auth/register') {
     const body = await readJson(request);

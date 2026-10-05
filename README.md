@@ -128,3 +128,12 @@ https://locator.riftbound.uvsgames.com/stores/<store-uuid>
 When a store is first added, Event Watch records the event IDs already present without notifying the user. On later checks, newly observed `/events/<id>` links are treated as new LGS events and queued for the next digest email.
 
 The database objects for this feature are created by `migrations/0003_lgs_watch_and_alert_queue.sql`. The same migration adds the generic alert queue used to batch event-availability and LGS-new-event notifications.
+
+
+### Notification settings
+
+Signed-in users can open **Settings** on the dashboard to enable or disable email alerts for their account and push alerts for the current browser/device independently. Email stays enabled by default and requires a verified address. Push is opt-in and asks for browser permission only when enabled; **Send test notification** checks delivery. Turning off push or signing out removes that browser subscription. Other subscribed devices remain enabled.
+
+The existing scheduler sends alerts for registration availability and new events on watched LGS pages. Push notifications open the matching Event Watch detail page. Email and each device have separate delivery records, so transient failures retry without repeating successful channel deliveries. Expired push subscriptions are removed automatically.
+
+Migration `0005_notifications.sql` adds notification preferences, device subscriptions, delivery records, and a server-side VAPID signing identity. The Worker generates and persists that identity in D1 on first use; the private key is never returned to clients or committed to source control. No additional provider account or deployment secret is required. Keep the D1 configuration row when migrating the database so existing device subscriptions continue to work.

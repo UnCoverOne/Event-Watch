@@ -4,7 +4,7 @@ const INTERVALS = [
   [30, 'Every 30 minutes'], [60, 'Every hour'], [180, 'Every 3 hours'],
   [360, 'Every 6 hours'], [720, 'Every 12 hours'], [1440, 'Every day'],
 ];
-const BUILD_ID = '2026-10-06-detail-pages';
+const BUILD_ID = '2026-10-06-push-notifications';
 
 const params = new URL(location.href).searchParams;
 const kind = params.get('kind');
@@ -310,6 +310,14 @@ async function withBusy(control, task) {
 }
 
 async function logout() {
+  if ('serviceWorker' in navigator) {
+    const registration = await navigator.serviceWorker.getRegistration('/');
+    const subscription = await registration?.pushManager?.getSubscription();
+    if (subscription) {
+      await api('/api/push/subscriptions', { method: 'DELETE', body: { endpoint: subscription.endpoint } });
+      await subscription.unsubscribe();
+    }
+  }
   await api('/api/auth/logout', { method: 'POST' }).catch(() => {});
   location.replace('/');
 }

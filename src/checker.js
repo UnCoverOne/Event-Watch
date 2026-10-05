@@ -1,3 +1,4 @@
+import { sendPush, alertNotification } from './push.js';
 import { fetchEvent, fetchLgsStore } from './adapters.js';
 import { nowIso, uuid } from './utils.js';
 import { sendWatchDigestEmail } from './email.js';
@@ -110,6 +111,7 @@ export async function checkOneEvent(env, event, options = {}) {
           itemKey: `${subscription.id}:${event.id}:${checkedAt}`,
           title: parsed.title || event.title || 'Watched event',
           itemUrl: event.event_url,
+          detailUrl: `/detail.html?kind=event&id=${encodeURIComponent(event.id)}`,
           message: parsed.reason || 'Registration or booking appears to be available.',
           createdAt: checkedAt,
         });
@@ -219,6 +221,7 @@ export async function checkOneLgs(env, store, options = {}) {
             itemKey: `${subscription.id}:${event.eventKey}`,
             title: event.title || `Riftbound event #${event.eventKey}`,
             itemUrl: event.eventUrl,
+            detailUrl: `/detail.html?kind=lgs&id=${encodeURIComponent(store.id)}`,
             message: `New event added to ${storeTitle}.`,
             createdAt: checkedAt,
           });
@@ -275,48 +278,59 @@ export async function checkOneLgs(env, store, options = {}) {
 
 export async function flushAlertQueue(env, options = {}) {
   const userId = options.userId || null;
-  const whereUser = userId ? ' AND q.user_id = ?' : '';
   const statement = env.DB.prepare(`
-    SELECT
-      q.id, q.user_id, q.kind, q.item_key, q.title,
-      q.item_url, q.message, q.created_at,
-      u.email, u.email_verified_at
-    FROM alert_queue q
-    JOIN users u ON u.id = q.user_id
-    WHERE q.sent_at IS NULL${whereUser}
-    ORDER BY q.created_at ASC
-    LIMIT 500
+    SELECT q.*, u.email, u.email_verified_at, u.email_notifications
+    FROM alert_queue q JOIN users u ON u.id = q.user_id
+    WHERE q.sent_at IS NULL${userId ? ' AND q.user_id = ?' : ''}
+    ORDER BY q.created_at ASC LIMIT 500
   `);
   const result = userId ? await statement.bind(userId).all() : await statement.all();
-  const groups = groupAlertsByUser(result.results || []);
-
-  let emailsSent = 0;
-  let alertsSent = 0;
-  let failures = 0;
-
-  for (const group of groups) {
-    if (!group.email_verified_at) continue;
-
+  let emailsSent = 0, pushesSent = 0, alertsSent = 0, failures = 0;
+  for (const group of groupAlertsByUser(result.results || [])) {
+    const lockToken = uuid();
+    const locked = await env.DB.prepare(`INSERT INTO notification_delivery_locks (user_id, token, expires_at) VALUES (?, ?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET token = excluded.token, expires_at = excluded.expires_at
+      WHERE notification_delivery_locks.expires_at <= ?`).bind(group.user_id, lockToken, new Date(Date.now() + 10 * 60_000).toISOString(), nowIso()).run();
+    if (!locked.meta?.changes) continue;
     try {
-      await sendWatchDigestEmail(env, {
-        email: group.email,
-        alerts: group.alerts,
-      });
+      // Refresh inside the lease: another flush may have completed these rows.
+      group.alerts = (await env.DB.prepare('SELECT * FROM alert_queue WHERE user_id = ? AND sent_at IS NULL ORDER BY created_at LIMIT 100').bind(group.user_id).all()).results || [];
 
-      const sentAt = nowIso();
-      await env.DB.batch(group.alerts.map((alert) =>
-        env.DB.prepare('UPDATE alert_queue SET sent_at = ? WHERE id = ? AND sent_at IS NULL')
-          .bind(sentAt, alert.id)
-      ));
-      emailsSent++;
-      alertsSent += group.alerts.length;
-    } catch (error) {
-      failures++;
-      console.error('Digest notification failed', group.user_id, error);
+      const emailPending = group.alerts.filter(a => !a.email_sent_at);
+      let emailComplete = !group.email_notifications || !emailPending.length;
+      if (!emailComplete && group.email_verified_at) {
+        try {
+          await sendWatchDigestEmail(env, { email: group.email, alerts: emailPending });
+          await env.DB.batch(emailPending.map(a => env.DB.prepare('UPDATE alert_queue SET email_sent_at = ? WHERE id = ?').bind(nowIso(), a.id)));
+          emailsSent++; emailComplete = true;
+        } catch (error) { failures++; console.error('Email notification failed', group.user_id, error); }
+      }
+      const subs = (await env.DB.prepare('SELECT * FROM push_subscriptions WHERE user_id = ? AND enabled = 1').bind(group.user_id).all()).results || [];
+      for (const alert of group.alerts) {
+        let pushComplete = true;
+        for (const sub of subs) {
+          // Do not deliver old queued events to a newly enabled device.
+          if (sub.created_at > alert.created_at) continue;
+          const delivered = await env.DB.prepare('SELECT sent_at FROM push_deliveries WHERE alert_id = ? AND subscription_id = ?').bind(alert.id, sub.id).first();
+          if (delivered) continue;
+          try {
+            const sent = await sendPush(env, sub, alertNotification(alert));
+            if (sent) {
+              await env.DB.prepare('INSERT OR IGNORE INTO push_deliveries (alert_id, subscription_id, sent_at) VALUES (?, ?, ?)').bind(alert.id, sub.id, nowIso()).run();
+              pushesSent++;
+            }
+          } catch (error) { pushComplete = false; failures++; console.error('Push notification failed', sub.id, error); }
+        }
+        if (emailComplete && pushComplete) {
+          await env.DB.prepare('UPDATE alert_queue SET sent_at = ? WHERE id = ? AND sent_at IS NULL').bind(nowIso(), alert.id).run();
+          alertsSent++;
+        }
+      }
+    } finally {
+      await env.DB.prepare('DELETE FROM notification_delivery_locks WHERE user_id = ? AND token = ?').bind(group.user_id, lockToken).run();
     }
   }
-
-  return { emailsSent, alertsSent, failures };
+  return { emailsSent, pushesSent, alertsSent, failures };
 }
 
 export function groupAlertsByUser(rows) {
@@ -328,6 +342,7 @@ export function groupAlertsByUser(rows) {
         user_id: row.user_id,
         email: row.email,
         email_verified_at: row.email_verified_at,
+        email_notifications: row.email_notifications,
         alerts: [],
       });
     }
@@ -340,8 +355,8 @@ export function groupAlertsByUser(rows) {
 async function enqueueAlert(env, alert) {
   const result = await env.DB.prepare(`
     INSERT OR IGNORE INTO alert_queue
-      (id, user_id, kind, item_key, title, item_url, message, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      (id, user_id, kind, item_key, title, item_url, message, created_at, detail_url)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     uuid(),
     alert.userId,
@@ -350,7 +365,8 @@ async function enqueueAlert(env, alert) {
     String(alert.title || 'Event Watch update').slice(0, 300),
     alert.itemUrl,
     alert.message || null,
-    alert.createdAt || nowIso()
+    alert.createdAt || nowIso(),
+    alert.detailUrl || null
   ).run();
 
   return Number(result.meta?.changes || 0) > 0;

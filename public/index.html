@@ -33,6 +33,7 @@
           <span class="theme-icon" aria-hidden="true">☀</span>
           <span id="themeLabel">Light</span>
         </button>
+        <button id="settingsButton" class="link-button hidden" type="button">Settings</button>
         <button id="logoutButton" class="link-button hidden" type="button">Sign out</button>
       </div>
     </header>
@@ -162,6 +163,14 @@
       </section>
     </section>
 
+    <dialog id="notificationSettings" class="settings-dialog">
+      <div class="settings-heading"><h2>Notifications</h2><button id="closeSettings" class="link-button" type="button" aria-label="Close settings">Close</button></div>
+      <p class="muted">Choose how you receive registration and new LGS event alerts.</p>
+      <label class="notification-option"><span><strong>Email notifications</strong><small>Applies to your account. Email verification is required.</small></span><input id="emailNotifications" type="checkbox" /></label>
+      <label class="notification-option"><span><strong>Push notifications</strong><small>Applies to this device. Your browser will ask for permission.</small></span><input id="pushNotifications" type="checkbox" /></label>
+      <button id="testPush" class="small-button" type="button" disabled>Send test notification</button>
+      <p id="notificationStatus" class="hint" role="status" aria-live="polite"></p>
+    </dialog>
     <footer>
       <span>Scheduler wakes every 5 minutes; each watch follows its selected refresh rate.</span>
       <span>Updates found in the same scheduler window are grouped into one email.</span>

@@ -334,9 +334,10 @@ test("Refresh results forces selected catalogue sources before returning", async
   let calls = 0;
   t.mock.method(globalThis, "fetch", async (url, options) => {
     calls++;
-    assert.equal(url, "https://playriftbound.com/api/gql");
-    const body = JSON.parse(options.body);
-    assert.equal(body.operationName, "CompeteTournamentSearch");
+    const parsed = new URL(url);
+    assert.equal(parsed.origin + parsed.pathname, "https://playriftbound.com/api/gql");
+    assert.equal(options.method, undefined);
+    assert.equal(parsed.searchParams.get("operationName"), "CompeteTournamentSearch");
     return Response.json({
       data: {
         competeTournamentSearch: {
@@ -385,11 +386,14 @@ test("Play Riftbound organizer addresses populate country codes for scoped brows
 test("Play Riftbound uses its public persisted operation and rejects GraphQL errors", async (t) => {
   let bad = false;
   t.mock.method(globalThis, "fetch", async (url, options) => {
-    assert.equal(url, "https://playriftbound.com/api/gql");
-    const body = JSON.parse(options.body);
-    assert.equal(body.operationName, "CompeteTournamentSearch");
-    assert.deepEqual(body.variables.filter, { rb: {} });
-    assert.equal(body.extensions.persistedQuery.sha256Hash, "9e2e6f2d6f9d08baac662f04222dfce639a327d0c41d7fcacc2d13d535daf55a");
+    const parsed = new URL(url);
+    assert.equal(parsed.origin + parsed.pathname, "https://playriftbound.com/api/gql");
+    assert.equal(options.method, undefined);
+    assert.equal(parsed.searchParams.get("operationName"), "CompeteTournamentSearch");
+    const variables = JSON.parse(parsed.searchParams.get("variables"));
+    const extensions = JSON.parse(parsed.searchParams.get("extensions"));
+    assert.deepEqual(variables.filter, { rb: {} });
+    assert.equal(extensions.persistedQuery.sha256Hash, "9e2e6f2d6f9d08baac662f04222dfce639a327d0c41d7fcacc2d13d535daf55a");
     return Response.json(
       bad
         ? { errors: [{ message: "Unavailable" }] }

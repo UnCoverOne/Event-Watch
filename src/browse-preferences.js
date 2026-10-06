@@ -45,7 +45,18 @@ export function scopeConditions(scope, kind) {
   const marks = scope.sources.map(() => '?').join(',');
   const where = [`(e.source IN (${marks}) OR EXISTS (SELECT 1 FROM catalogue_sources cs WHERE cs.kind = ? AND cs.entity_id = e.id AND cs.source IN (${marks})))`];
   const args = [...scope.sources, kind, ...scope.sources];
-  if (scope.country !== '*') { where.push('e.country = ?'); args.push(scope.country); }
+  if (scope.country !== '*') {
+    const countries = [scope.country];
+    try {
+      const name = new Intl.DisplayNames(['en'], { type: 'region' }).of(scope.country);
+      if (name && name !== scope.country) countries.push(name);
+    } catch {}
+    if (scope.country === 'GB') countries.push('UK', 'United Kingdom');
+    if (scope.country === 'US') countries.push('USA', 'United States', 'United States of America');
+    const unique = [...new Set(countries)];
+    where.push(`e.country IN (${unique.map(() => '?').join(',')})`);
+    args.push(...unique);
+  }
   if (scope.city) {
     where.push("e.city LIKE ? ESCAPE '\\'");
     args.push(`%${scope.city.replace(/[\\%_]/g, '\\$&')}%`);

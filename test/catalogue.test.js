@@ -326,6 +326,35 @@ test("failed source page retains data and cursor; retries are idempotent", async
   );
   db.close();
 });
+test("Refresh results forces selected catalogue sources before returning", async (t) => {
+  const { db, request } = await fixture();
+  db.prepare("UPDATE user_browse_preferences SET config = ? WHERE user_id = 'u'")
+    .run(JSON.stringify({ sources: ["play"], country: "*", city: "" }));
+
+  let calls = 0;
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    calls++;
+    assert.equal(url, "https://playriftbound.com/api/gql");
+    const body = JSON.parse(options.body);
+    assert.equal(body.operationName, "CompeteTournamentSearch");
+    return Response.json({
+      data: {
+        competeTournamentSearch: {
+          edges: [],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      },
+    });
+  });
+
+  const result = await request("/api/catalogue/refresh", "POST");
+  assert.equal(result.refreshed.length, 1);
+  assert.equal(result.refreshed[0].source, "play");
+  assert.equal(calls, 1);
+  assert.ok(db.prepare("SELECT last_checked_at FROM catalogue_sync WHERE source = 'play'").get().last_checked_at);
+  db.close();
+});
+
 test("Play Riftbound organizer addresses populate country codes for scoped browsing", async () => {
   assert.equal(countryCodeFromFormattedAddress("Strada Ion Câmpineanu 20, București, Romania"), "RO");
   assert.equal(countryCodeFromFormattedAddress("Hauptstraße 111, 69242 Mühlhausen, Germany"), "DE");

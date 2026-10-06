@@ -242,9 +242,15 @@ export async function fetchSourcePage(source, cursor = null) {
   if (source === "play") {
     const data = await playQuery("CompeteTournamentSearch", {
       sport: "rb",
-      // Riftbound searches require the sport-specific filter namespace even
-      // when no geographic restriction is requested.
-      filter: { rb: {} },
+      // Riot requires Riftbound searches to include coordinates. Use the
+      // maximum practical radius so the shared catalogue can index globally;
+      // user country/city preferences are applied after records are stored.
+      filter: {
+        rb: {
+          coords: { latitude: 0, longitude: 0 },
+          distanceMeters: 40075000,
+        },
+      },
       sortBy: {},
       first: 10,
       ...(cursor ? { after: cursor } : {}),

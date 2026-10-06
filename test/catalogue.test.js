@@ -388,7 +388,7 @@ test("Play Riftbound uses its public persisted operation and rejects GraphQL err
     assert.equal(url, "https://playriftbound.com/api/gql");
     const body = JSON.parse(options.body);
     assert.equal(body.operationName, "CompeteTournamentSearch");
-    assert.equal(body.variables.filter.rb.distanceMeters, 40075000);
+    assert.deepEqual(body.variables.filter, { rb: {} });
     assert.ok(body.extensions.persistedQuery.sha256Hash);
     return Response.json(
       bad

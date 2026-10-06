@@ -21,6 +21,10 @@ export async function sourceJson(url, options = {}) {
 }
 export async function playQuery(operationName, variables) {
   const extensions = {
+    clientLibrary: {
+      name: "@apollo/client",
+      version: "4.1.2",
+    },
     persistedQuery: {
       version: 1,
       sha256Hash: PLAY_OPERATIONS[operationName],
@@ -31,10 +35,11 @@ export async function playQuery(operationName, variables) {
     variables: JSON.stringify(variables),
     extensions: JSON.stringify(extensions),
   });
-  const data = await sourceJson(`https://playriftbound.com/api/gql?${query}`, {
+  const data = await sourceJson(`https://lolesports.com/api/gql?${query}`, {
     headers: {
-      "apollographql-client-name": "Event Watch",
-      "apollographql-client-version": "1.0",
+      "apollographql-client-name": "Esports Web",
+      "apollographql-client-version": "1f05c07",
+      "content-type": "application/json",
     },
   });
   if (data.errors?.length || !data.data)
@@ -234,7 +239,8 @@ export async function fetchSourcePage(source, cursor = null) {
       // Catalogue indexing must not invent a geographic origin. Play Riftbound
       // accepts an empty filter for the global tournament listing; user country
       // and city preferences are applied locally after records are indexed.
-      filter: { rb: {} },
+      filter: {},
+      sortBy: {},
       first: 10,
       ...(cursor ? { after: cursor } : {}),
     });

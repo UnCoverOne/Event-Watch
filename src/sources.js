@@ -114,6 +114,43 @@ export function uvsEvent(r, at = Date.now()) {
     capacity,
   };
 }
+let playCountryNames;
+function normalizeCountryName(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+export function countryCodeFromFormattedAddress(address) {
+  const country = String(address || "").split(",").at(-1)?.trim();
+  if (!country) return null;
+  const upper = country.toUpperCase();
+  if (/^[A-Z]{2}$/.test(upper)) return upper;
+  const aliases = new Map([
+    ["uk", "GB"],
+    ["u k", "GB"],
+    ["united kingdom", "GB"],
+    ["usa", "US"],
+    ["u s a", "US"],
+    ["united states of america", "US"],
+  ]);
+  const normalized = normalizeCountryName(country);
+  if (aliases.has(normalized)) return aliases.get(normalized);
+  if (!playCountryNames) {
+    playCountryNames = new Map();
+    const names = new Intl.DisplayNames(["en"], { type: "region" });
+    for (let a = 65; a <= 90; a++)
+      for (let b = 65; b <= 90; b++) {
+        const code = String.fromCharCode(a, b);
+        const name = names.of(code);
+        if (name && name !== code)
+          playCountryNames.set(normalizeCountryName(name), code);
+      }
+  }
+  return playCountryNames.get(normalized) || null;
+}
 export function playStore(s) {
   if (!s?.id || !s.name) throw new Error("Invalid Play Riftbound organizer.");
   return {
@@ -125,7 +162,7 @@ export function playStore(s) {
     title: s.name,
     address: s.physicalAddress?.formattedAddress || null,
     city: s.physicalAddress?.city || null,
-    country: null,
+    country: countryCodeFromFormattedAddress(s.physicalAddress?.formattedAddress),
     latitude: number(s.physicalAddress?.latitude),
     longitude: number(s.physicalAddress?.longitude),
   };
@@ -158,6 +195,7 @@ export function playEvent(
     status = "CLOSED";
   else if (detail && String(t.registrationPolicy).toLowerCase() === "open")
     status = "AVAILABLE";
+  const store = organizer ? playStore(organizer) : null;
   return {
     source: "play",
     source_id: String(t.id),
@@ -167,11 +205,11 @@ export function playEvent(
     title: t.name,
     starts_at: iso(t.startsAt),
     event_date: iso(t.startsAt),
-    store: organizer ? playStore(organizer) : null,
+    store,
     host_lgs: organizer?.name || null,
     address: organizer?.physicalAddress?.formattedAddress || null,
     city: organizer?.physicalAddress?.city || null,
-    country: null,
+    country: store?.country || null,
     latitude: number(organizer?.physicalAddress?.latitude),
     longitude: number(organizer?.physicalAddress?.longitude),
     format: t.config?.format || null,

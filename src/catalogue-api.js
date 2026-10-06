@@ -213,49 +213,80 @@ async function reconcileStoreDuplicates(env, scope) {
   return { merged };
 }
 
-async function regionalAnchor(env, scope, request) {
-  if (scope.country === "*") return null;
-  const countries = countryNames(scope.country);
-  const marks = countries.map(() => "?").join(",");
-  const citySql = scope.city ? " AND city LIKE ?" : "";
-  const cityArg = scope.city ? `%${scope.city}%` : null;
-  const args = scope.city
-    ? [...countries, cityArg, ...countries, cityArg]
-    : [...countries, ...countries];
+function averagePoint(points) {
+  if (!points.length) return null;
+  return {
+    latitude:
+      points.reduce((sum, point) => sum + Number(point.latitude), 0) /
+      points.length,
+    longitude:
+      points.reduce((sum, point) => sum + Number(point.longitude), 0) /
+      points.length,
+  };
+}
 
-  const row = await env.DB.prepare(
-    `SELECT AVG(latitude) AS latitude, AVG(longitude) AS longitude FROM (
-      SELECT latitude, longitude FROM events
-      WHERE country IN (${marks}) AND latitude IS NOT NULL AND longitude IS NOT NULL${citySql}
-      UNION ALL
-      SELECT latitude, longitude FROM lgs_stores
-      WHERE country IN (${marks}) AND latitude IS NOT NULL AND longitude IS NOT NULL${citySql}
-    )`,
-  )
-    .bind(...args)
-    .first();
+function playRegionalAnchors(scope, known, request) {
+  const maxDistanceMeters = 160934; // Riot UI maximum: 100 miles.
+  const coverageKm = 135;
+  const validPoints = known.points.filter(
+    (point) =>
+      Number.isFinite(Number(point.latitude)) &&
+      Number.isFinite(Number(point.longitude)),
+  );
 
-  if (
-    Number.isFinite(Number(row?.latitude)) &&
-    Number.isFinite(Number(row?.longitude))
-  )
-    return {
-      latitude: Number(row.latitude),
-      longitude: Number(row.longitude),
-    };
+  if (scope.city) {
+    const city = placeKey(scope.city);
+    const matches = validPoints.filter(
+      (point) => placeKey(point.city) === city,
+    );
+    const anchor = averagePoint(matches.length ? matches : validPoints);
+    if (anchor)
+      return { anchors: [anchor], distanceMeters: maxDistanceMeters };
+  }
+
+  const byCity = new Map();
+  for (const point of validPoints) {
+    const key =
+      placeKey(point.city) ||
+      `${Number(point.latitude).toFixed(2)},${Number(point.longitude).toFixed(2)}`;
+    if (!byCity.has(key)) byCity.set(key, []);
+    byCity.get(key).push(point);
+  }
+  const candidates = [...byCity.values()]
+    .map(averagePoint)
+    .filter(Boolean);
+
+  const anchors = [];
+  for (const candidate of candidates) {
+    if (
+      anchors.every(
+        (anchor) => pointDistanceKm(candidate, anchor) > coverageKm,
+      )
+    )
+      anchors.push(candidate);
+    if (anchors.length >= 20) break;
+  }
 
   const cf = request.cf || {};
   if (
     String(cf.country || "").toUpperCase() === scope.country &&
     Number.isFinite(Number(cf.latitude)) &&
     Number.isFinite(Number(cf.longitude))
-  )
-    return {
+  ) {
+    const point = {
       latitude: Number(cf.latitude),
       longitude: Number(cf.longitude),
     };
+    if (
+      anchors.every((anchor) => pointDistanceKm(point, anchor) > coverageKm)
+    )
+      anchors.unshift(point);
+  }
 
-  return null;
+  return {
+    anchors: anchors.slice(0, 20),
+    distanceMeters: maxDistanceMeters,
+  };
 }
 
 async function safeSyncCatalogue(env, options) {
@@ -268,63 +299,76 @@ async function safeSyncCatalogue(env, options) {
 }
 
 async function refreshPlayRegion(env, scope, request) {
-  const anchor = await regionalAnchor(env, scope, request);
-  if (!anchor) return null;
+  if (scope.country === "*") return null;
 
-  // A country scope needs enough radius to cover the selected country, not
-  // half the world. Results are filtered by the organizer's authoritative
-  // country before they are stored.
-  const distanceMeters = scope.city ? 100000 : 650000;
-  let after = null;
+  const knownLocations = await knownScopeLocations(env, scope);
+  const { anchors, distanceMeters } = playRegionalAnchors(
+    scope,
+    knownLocations,
+    request,
+  );
+  if (!anchors.length) return null;
+
+  const seenTournamentIds = new Set();
   let imported = 0;
   let scanned = 0;
-  let pages = 0;
-  let complete = false;
-  const at = nowIso();
-  const knownLocations = await knownScopeLocations(env, scope);
   let inferred = 0;
+  let pages = 0;
+  let complete = true;
+  const at = nowIso();
 
-  while (pages < 20) {
-    const data = await playQuery("CompeteTournamentSearch", {
-      sport: "rb",
-      filter: { rb: { coords: anchor, distanceMeters } },
-      sortBy: {},
-      first: 50,
-      ...(after ? { after } : {}),
-    });
+  for (const anchor of anchors) {
+    let after = null;
+    let anchorComplete = false;
 
-    const listing = data.competeTournamentSearch;
-    if (!Array.isArray(listing?.edges) || !listing.pageInfo)
-      throw new Error("Invalid Play Riftbound listing.");
+    for (let anchorPage = 0; anchorPage < 20; anchorPage++) {
+      const data = await playQuery("CompeteTournamentSearch", {
+        sport: "rb",
+        filter: { rb: { coords: anchor, distanceMeters } },
+        sortBy: {},
+        first: 50,
+        ...(after ? { after } : {}),
+      });
 
-    for (const edge of listing.edges) {
-      const tournament = edge.node?.tournament;
-      const organizer = edge.node?.organizer;
-      if (!tournament || !organizer) continue;
+      const listing = data.competeTournamentSearch;
+      if (!Array.isArray(listing?.edges) || !listing.pageInfo)
+        throw new Error("Invalid Play Riftbound listing.");
 
-      scanned++;
-      let record = playEvent(tournament, organizer);
-      const originalCountry = record.country;
-      record = inferPlayScope(record, scope, knownLocations);
-      if (!originalCountry && record.country) inferred++;
+      for (const edge of listing.edges) {
+        const tournament = edge.node?.tournament;
+        const organizer = edge.node?.organizer;
+        if (!tournament || !organizer) continue;
 
-      if (scope.country !== "*" && record.country !== scope.country) continue;
-      if (!cityMatches(record.city, scope.city)) continue;
+        const tournamentId = String(tournament.id || "");
+        if (!tournamentId || seenTournamentIds.has(tournamentId)) continue;
+        seenTournamentIds.add(tournamentId);
+        scanned++;
 
-      await saveRecord(env, "event", record, at);
-      imported++;
+        let record = playEvent(tournament, organizer);
+        const originalCountry = record.country;
+        record = inferPlayScope(record, scope, knownLocations);
+        if (!originalCountry && record.country) inferred++;
+
+        if (record.country !== scope.country) continue;
+        if (!cityMatches(record.city, scope.city)) continue;
+
+        await saveRecord(env, "event", record, at);
+        imported++;
+      }
+
+      pages++;
+      if (!listing.pageInfo.hasNextPage) {
+        anchorComplete = true;
+        break;
+      }
+
+      const next = listing.pageInfo.endCursor;
+      if (!next || next === after)
+        throw new Error("Invalid Play Riftbound pagination.");
+      after = next;
     }
 
-    pages++;
-    if (!listing.pageInfo.hasNextPage) {
-      complete = true;
-      break;
-    }
-
-    const next = listing.pageInfo.endCursor;
-    if (!next || next === after)
-      throw new Error("Invalid Play Riftbound pagination.");
-    after = next;
+    if (!anchorComplete) complete = false;
   }
 
   try {
@@ -342,6 +386,7 @@ async function refreshPlayRegion(env, scope, request) {
     count: imported,
     scanned,
     inferred,
+    anchors: anchors.length,
     pages,
     complete,
     regional: true,

@@ -358,6 +358,93 @@ test("Refresh results forces selected catalogue sources before returning", async
   db.close();
 });
 
+test("Play country refresh covers distant known cities with separate Riot searches", async (t) => {
+  const { env, db, request } = await fixture();
+  db.prepare("UPDATE user_browse_preferences SET config = ? WHERE user_id = 'u'")
+    .run(JSON.stringify({ sources: ["play"], country: "RO", city: "" }));
+
+  await saveRecord(env, "store", uvsStore({
+    id: "bucharest-known",
+    name: "Bucharest Anchor",
+    city: "București",
+    country: "RO",
+    full_address: "București, Romania",
+    latitude: 44.4268,
+    longitude: 26.1025,
+  }));
+  await saveRecord(env, "store", uvsStore({
+    id: "cluj-known",
+    name: "Cluj Anchor",
+    city: "Cluj-Napoca",
+    country: "RO",
+    full_address: "Cluj-Napoca, Romania",
+    latitude: 46.7712,
+    longitude: 23.6236,
+  }));
+
+  const queries = [];
+  t.mock.method(globalThis, "fetch", async (url) => {
+    const parsed = new URL(url);
+    const variables = JSON.parse(parsed.searchParams.get("variables"));
+    const coords = variables.filter.rb.coords;
+    queries.push(coords);
+    const bucharest =
+      Math.abs(coords.latitude - 44.4268) < 0.2 &&
+      Math.abs(coords.longitude - 26.1025) < 0.2;
+
+    return Response.json({
+      data: {
+        competeTournamentSearch: {
+          edges: [{
+            node: {
+              tournament: {
+                id: bucharest ? "ramcards-visible" : "checkpoint-visible",
+                name: bucharest
+                  ? "Radiance Pre-Rift Event | RamCards"
+                  : "Nexus Nights",
+                startsAt: "2099-10-16T16:00:00Z",
+                registrantCounts: [],
+                config: {},
+              },
+              organizer: {
+                id: bucharest
+                  ? "ramcards-visible-store"
+                  : "checkpoint-visible-store",
+                name: bucharest ? "RamCards" : "Checkpoint",
+                physicalAddress: {
+                  formattedAddress: bucharest ? "București" : "Cluj-Napoca",
+                  city: bucharest ? "București" : "Cluj-Napoca",
+                  latitude: bucharest ? 44.43 : 46.77,
+                  longitude: bucharest ? 26.10 : 23.62,
+                },
+              },
+            },
+          }],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      },
+    });
+  });
+
+  const result = await request("/api/catalogue/refresh", "POST");
+  const play = result.refreshed.find((row) => row.source === "play");
+  assert.ok(play.anchors >= 2);
+  assert.ok(queries.length >= 2);
+  assert.equal(
+    db.prepare("SELECT COUNT(*) n FROM events WHERE source='play'").get().n,
+    2,
+  );
+  assert.equal(
+    db.prepare("SELECT COUNT(*) n FROM events WHERE host_lgs='RamCards'").get().n,
+    1,
+  );
+  assert.equal(
+    db.prepare("SELECT COUNT(*) n FROM lgs_stores WHERE title='RamCards'").get().n,
+    1,
+  );
+  db.close();
+});
+
 test("Play regional refresh keeps organizers whose city proves the selected country", async (t) => {
   const { env, db, request } = await fixture();
   db.prepare("UPDATE user_browse_preferences SET config = ? WHERE user_id = 'u'")

@@ -235,7 +235,7 @@ export async function fetchSourcePage(source, cursor = null) {
       // Catalogue indexing must not invent a geographic origin. Play Riftbound
       // accepts an empty filter for the global tournament listing; user country
       // and city preferences are applied locally after records are indexed.
-      filter: {},
+      filter: { rb: {} },
       first: 10,
       ...(cursor ? { after: cursor } : {}),
     });

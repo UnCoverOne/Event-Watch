@@ -521,7 +521,9 @@ async function loadSourceStatus() {
             ? `Update unavailable: ${esc(s.last_error)} · showing saved data`
             : s.last_completed_at
               ? `Updated ${esc(dateTime(s.last_checked_at))}`
-              : "Initial indexing in progress; results are not yet complete";
+              : s.last_checked_at
+                ? `Indexing in progress · last batch ${esc(dateTime(s.last_checked_at))}`
+                : "Initial indexing in progress; results are not yet complete";
           return `<div>${esc(label)} · ${status}</div>`;
         })
         .join(

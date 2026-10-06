@@ -16,7 +16,13 @@ export async function sourceJson(url, options = {}) {
     redirect: "manual",
     signal: AbortSignal.timeout(20000),
   });
-  if (!response.ok) throw new Error(`Source returned HTTP ${response.status}`);
+  if (!response.ok) {
+    let detail = "";
+    try {
+      detail = (await response.text()).replace(/\s+/g, " ").trim().slice(0, 240);
+    } catch {}
+    throw new Error(`Source returned HTTP ${response.status}${detail ? `: ${detail}` : ""}`);
+  }
   return response.json();
 }
 export async function playQuery(operationName, variables) {

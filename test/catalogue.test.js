@@ -12,6 +12,8 @@ import {
   uvsEvent,
   uvsStore,
   playEvent,
+  playStore,
+  countryCodeFromFormattedAddress,
   fetchSourcePage,
   parsePlayEventUrl,
 } from "../src/sources.js";
@@ -324,6 +326,33 @@ test("failed source page retains data and cursor; retries are idempotent", async
   );
   db.close();
 });
+test("Play Riftbound organizer addresses populate country codes for scoped browsing", async () => {
+  assert.equal(countryCodeFromFormattedAddress("Strada Ion Câmpineanu 20, București, Romania"), "RO");
+  assert.equal(countryCodeFromFormattedAddress("Hauptstraße 111, 69242 Mühlhausen, Germany"), "DE");
+  assert.equal(countryCodeFromFormattedAddress("10 High Street, London, United Kingdom"), "GB");
+  assert.equal(countryCodeFromFormattedAddress("123 Main St, Seattle, WA, USA"), "US");
+  assert.equal(countryCodeFromFormattedAddress("Unknown venue"), null);
+
+  const organizer = {
+    id: "org-ro",
+    name: "Bucharest Games",
+    physicalAddress: {
+      formattedAddress: "Strada Exemplu 1, București, Romania",
+      city: "București",
+      latitude: 44.4268,
+      longitude: 26.1025,
+    },
+  };
+  assert.equal(playStore(organizer).country, "RO");
+  assert.equal(playEvent({
+    id: "play-ro",
+    name: "Radiance Pre-Rift",
+    startsAt: "2099-10-16T16:00:00Z",
+    registrantCounts: [],
+    config: {},
+  }, organizer).country, "RO");
+});
+
 test("Play Riftbound uses its public persisted operation and rejects GraphQL errors", async (t) => {
   let bad = false;
   t.mock.method(globalThis, "fetch", async (url, options) => {

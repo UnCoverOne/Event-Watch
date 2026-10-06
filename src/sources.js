@@ -197,7 +197,7 @@ export async function fetchSourcePage(source, cursor = null) {
       filter: {
         rb: { coords: { latitude: 0, longitude: 0 }, distanceMeters: 40075000 },
       },
-      first: 100,
+      first: 10,
       ...(cursor ? { after: cursor } : {}),
     });
     const listing = data.competeTournamentSearch;
@@ -220,7 +220,7 @@ export async function fetchSourcePage(source, cursor = null) {
   const store = source === "uvs-stores";
   const query = new URLSearchParams({
     game_slug: "riftbound",
-    page_size: "100",
+    page_size: "10",
     page: String(page),
     ...(store ? {} : { upcoming_only: "true" }),
   });

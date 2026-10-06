@@ -515,6 +515,15 @@ test("legacy display dates become sortable and past listings leave upcoming brow
   db.close();
 });
 
+test("catalogue imports skip a leased source so other sources can progress", async (t) => {
+  const { db, env } = await fixture();
+  db.prepare("UPDATE catalogue_sync SET lease_until = ? WHERE source != 'uvs-stores'").run(new Date(Date.now() + 300000).toISOString());
+  t.mock.method(globalThis, "fetch", async () => new Response(JSON.stringify({ results: [], next_page_number: null })));
+  const result = await syncCatalogue(env);
+  assert.equal(result.source, "uvs-stores");
+  assert.equal(result.count, 0);
+});
+
 test("source requests use Workers-compatible manual redirects and reject redirects", async (t) => {
   t.mock.method(globalThis, "fetch", async (url, options) => {
     assert.equal(options.redirect, "manual");

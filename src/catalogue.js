@@ -141,10 +141,12 @@ export async function syncCatalogue(
         .bind(source)
         .first()
     : await env.DB.prepare(
-        `SELECT * FROM catalogue_sync WHERE last_checked_at IS NULL OR ((cursor IS NOT NULL OR last_error IS NOT NULL OR last_completed_at IS NULL) AND last_checked_at < ?) OR last_checked_at < ?
+        `SELECT * FROM catalogue_sync WHERE (lease_until IS NULL OR lease_until <= ?)
+      AND (last_checked_at IS NULL OR ((cursor IS NOT NULL OR last_error IS NOT NULL OR last_completed_at IS NULL) AND last_checked_at < ?) OR last_checked_at < ?)
       ORDER BY COALESCE(last_checked_at, '') ASC LIMIT 1`,
       )
         .bind(
+          nowIso(),
           new Date(Date.now() - 60_000).toISOString(),
           new Date(Date.now() - 30 * 60_000).toISOString(),
         )

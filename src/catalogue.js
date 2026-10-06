@@ -189,12 +189,20 @@ export async function syncCatalogue(
       next: page.next,
     };
   } catch (error) {
-    await env.DB.prepare(
-      `UPDATE catalogue_sync SET last_error = ?, last_checked_at = ?, lease_token = NULL, lease_until = NULL
-      WHERE source = ? AND lease_token = ?`,
-    )
-      .bind(String(error.message).slice(0, 400), at, sync.source, token)
-      .run();
+    try {
+      await env.DB.prepare(
+        `UPDATE catalogue_sync SET last_error = ?, last_checked_at = ?, lease_token = NULL, lease_until = NULL
+        WHERE source = ? AND lease_token = ?`,
+      )
+        .bind(String(error.message).slice(0, 400), at, sync.source, token)
+        .run();
+    } catch (statusError) {
+      console.error(
+        "Could not store catalogue sync error",
+        sync.source,
+        statusError.message,
+      );
+    }
     console.error("Catalogue sync failed", sync.source, error.message);
     return { source: sync.source, error: error.message };
   }

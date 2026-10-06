@@ -246,8 +246,8 @@ p {
   background: var(--surface);
 }
 .sidebar-bottom {
-  margin-top: auto;
-  padding-top: 48px;
+  margin-top: 24px;
+  padding-top: 0;
 }
 .sidebar-bottom p {
   font-size: 12px;

@@ -28,27 +28,50 @@ function countryNames(code) {
   return [...new Set(names)];
 }
 
+function cityMatches(actual, wanted) {
+  if (!wanted) return true;
+  return String(actual || "")
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .includes(
+      String(wanted)
+        .normalize("NFKD")
+        .replace(/\p{M}/gu, "")
+        .toLowerCase(),
+    );
+}
+
 async function regionalAnchor(env, scope, request) {
   if (scope.country === "*") return null;
   const countries = countryNames(scope.country);
-  const countryMarks = countries.map(() => "?").join(",");
-  const city = scope.city ? \`%\${scope.city.replace(/[\\%_]/g, "\\const KINDS = {
-  event: ["events", "subscriptions", "event_id"],
-  store: ["lgs_stores", "lgs_subscriptions", "store_id"],
-};")}%\` : null;
-  const citySql = city ? " AND city LIKE ? ESCAPE '\\\\'" : "";
-  const params = city ? [...countries, city, ...countries, city] : [...countries, ...countries];
+  const marks = countries.map(() => "?").join(",");
+  const citySql = scope.city ? " AND city LIKE ?" : "";
+  const cityArg = scope.city ? `%${scope.city}%` : null;
+  const args = scope.city
+    ? [...countries, cityArg, ...countries, cityArg]
+    : [...countries, ...countries];
+
   const row = await env.DB.prepare(
-    \`SELECT AVG(latitude) AS latitude, AVG(longitude) AS longitude FROM (
+    `SELECT AVG(latitude) AS latitude, AVG(longitude) AS longitude FROM (
       SELECT latitude, longitude FROM events
-      WHERE country IN (\${countryMarks}) AND latitude IS NOT NULL AND longitude IS NOT NULL\${citySql}
+      WHERE country IN (${marks}) AND latitude IS NOT NULL AND longitude IS NOT NULL${citySql}
       UNION ALL
       SELECT latitude, longitude FROM lgs_stores
-      WHERE country IN (\${countryMarks}) AND latitude IS NOT NULL AND longitude IS NOT NULL\${citySql}
-    )\`,
-  ).bind(...params).first();
-  if (Number.isFinite(Number(row?.latitude)) && Number.isFinite(Number(row?.longitude)))
-    return { latitude: Number(row.latitude), longitude: Number(row.longitude) };
+      WHERE country IN (${marks}) AND latitude IS NOT NULL AND longitude IS NOT NULL${citySql}
+    )`,
+  )
+    .bind(...args)
+    .first();
+
+  if (
+    Number.isFinite(Number(row?.latitude)) &&
+    Number.isFinite(Number(row?.longitude))
+  )
+    return {
+      latitude: Number(row.latitude),
+      longitude: Number(row.longitude),
+    };
 
   const cf = request.cf || {};
   if (
@@ -56,18 +79,36 @@ async function regionalAnchor(env, scope, request) {
     Number.isFinite(Number(cf.latitude)) &&
     Number.isFinite(Number(cf.longitude))
   )
-    return { latitude: Number(cf.latitude), longitude: Number(cf.longitude) };
+    return {
+      latitude: Number(cf.latitude),
+      longitude: Number(cf.longitude),
+    };
+
   return null;
+}
+
+async function safeSyncCatalogue(env, options) {
+  try {
+    return await syncCatalogue(env, options);
+  } catch (error) {
+    console.error("Catalogue refresh failed", options.source, error.message);
+    return { source: options.source, error: error.message };
+  }
 }
 
 async function refreshPlayRegion(env, scope, request) {
   const anchor = await regionalAnchor(env, scope, request);
   if (!anchor) return null;
 
-  const distanceMeters = scope.city ? 250000 : 5000000;
+  // A country scope needs enough radius to cover the selected country, not
+  // half the world. Results are filtered by the organizer's authoritative
+  // country before they are stored.
+  const distanceMeters = scope.city ? 100000 : 650000;
   let after = null;
   let imported = 0;
+  let scanned = 0;
   let pages = 0;
+  let complete = false;
   const at = nowIso();
 
   while (pages < 20) {
@@ -75,31 +116,145 @@ async function refreshPlayRegion(env, scope, request) {
       sport: "rb",
       filter: { rb: { coords: anchor, distanceMeters } },
       sortBy: {},
-      first: 25,
+      first: 50,
       ...(after ? { after } : {}),
     });
+
     const listing = data.competeTournamentSearch;
     if (!Array.isArray(listing?.edges) || !listing.pageInfo)
       throw new Error("Invalid Play Riftbound listing.");
 
     for (const edge of listing.edges) {
-      const record = playEvent(edge.node?.tournament, edge.node?.organizer);
+      const tournament = edge.node?.tournament;
+      const organizer = edge.node?.organizer;
+      if (!tournament || !organizer) continue;
+
+      scanned++;
+      const record = playEvent(tournament, organizer);
+      if (
+        scope.country !== "*" &&
+        record.country !== scope.country
+      )
+        continue;
+      if (!cityMatches(record.city, scope.city)) continue;
+
       await saveRecord(env, "event", record, at);
       imported++;
     }
 
     pages++;
-    if (!listing.pageInfo.hasNextPage) break;
+    if (!listing.pageInfo.hasNextPage) {
+      complete = true;
+      break;
+    }
+
     const next = listing.pageInfo.endCursor;
-    if (!next || next === after) throw new Error("Invalid Play Riftbound pagination.");
+    if (!next || next === after)
+      throw new Error("Invalid Play Riftbound pagination.");
     after = next;
   }
 
-  await env.DB.prepare(
-    "UPDATE catalogue_sync SET last_checked_at = ?, last_error = NULL WHERE source = 'play'",
-  ).bind(at).run();
-  return { source: "play", count: imported, pages, regional: true };
+  try {
+    await env.DB.prepare(
+      "UPDATE catalogue_sync SET last_checked_at = ?, last_error = NULL WHERE source = 'play'",
+    )
+      .bind(at)
+      .run();
+  } catch (error) {
+    console.error("Could not update Play source status", error.message);
+  }
+
+  return {
+    source: "play",
+    count: imported,
+    scanned,
+    pages,
+    complete,
+    regional: true,
+  };
 }
+
+async function scopedUvsStores(env, scope) {
+  const where = ["e.source = 'uvs'"];
+  const args = [];
+
+  if (scope.country !== "*") {
+    const countries = countryNames(scope.country);
+    where.push(`e.country IN (${countries.map(() => "?").join(",")})`);
+    args.push(...countries);
+  }
+  if (scope.city) {
+    where.push("e.city LIKE ?");
+    args.push(`%${scope.city}%`);
+  }
+
+  return (
+    (
+      await env.DB.prepare(
+        `SELECT e.* FROM lgs_stores e
+         WHERE ${where.join(" AND ")}
+         ORDER BY e.title COLLATE NOCASE
+         LIMIT 50`,
+      )
+        .bind(...args)
+        .all()
+    ).results || []
+  );
+}
+
+async function refreshUvsRegion(env, scope) {
+  const refreshed = [];
+
+  // Advance the shared catalogue a little, but do not hammer D1 with dozens
+  // of global pages in a single user request.
+  for (const source of ["uvs-stores", "uvs-stores", "uvs-events"]) {
+    const result = await safeSyncCatalogue(env, {
+      source,
+      force: true,
+      enabled: scope.sources,
+    });
+    refreshed.push(result);
+    if (result.error) break;
+  }
+
+  let stores = [];
+  try {
+    stores = await scopedUvsStores(env, scope);
+  } catch (error) {
+    refreshed.push({ source: "uvs-region", error: error.message });
+    return refreshed;
+  }
+
+  let refreshedStores = 0;
+  let visibleEvents = 0;
+  const errors = [];
+
+  // Store event endpoints are the authoritative UVS listing for a store and
+  // are much cheaper than writing hundreds of unrelated global records.
+  for (const store of stores) {
+    try {
+      const events = await catalogueStoreEvents(env, store, { refresh: true });
+      refreshedStores++;
+      visibleEvents += events.filter(
+        (event) =>
+          (scope.country === "*" ||
+            countryNames(scope.country).includes(event.country)) &&
+          cityMatches(event.city, scope.city),
+      ).length;
+    } catch (error) {
+      errors.push(`${store.title}: ${error.message}`);
+    }
+  }
+
+  refreshed.push({
+    source: "uvs-region",
+    stores: refreshedStores,
+    events: visibleEvents,
+    ...(errors.length ? { error: errors.slice(0, 3).join("; ") } : {}),
+  });
+  return refreshed;
+}
+
 export async function handleCatalogueApi(request, env) {
   const url = new URL(request.url),
     path = url.pathname,
@@ -115,38 +270,42 @@ export async function handleCatalogueApi(request, env) {
     }
   }
   if (method === "POST" && path === "/api/catalogue/refresh") {
-    const scope = await browseScope(env, await currentUser(request, env), url.searchParams);
+    const scope = await browseScope(
+      env,
+      await currentUser(request, env),
+      url.searchParams,
+    );
     if (!scope?.sources.length)
       return json({ refreshed: [], setup_required: true });
 
     const refreshed = [];
 
-    if (scope.sources.includes("uvs")) {
-      for (const source of ["uvs-events", "uvs-stores"]) {
-        for (let page = 0; page < 15; page++) {
-          const result = await syncCatalogue(env, { source, force: true, enabled: scope.sources });
-          refreshed.push(result);
-          if (result.error || result.skipped || result.next == null) break;
-        }
-      }
-    }
+    if (scope.sources.includes("uvs"))
+      refreshed.push(...(await refreshUvsRegion(env, scope)));
 
     if (scope.sources.includes("play")) {
       try {
         const regional = await refreshPlayRegion(env, scope, request);
         if (regional) refreshed.push(regional);
-        else {
-          for (let page = 0; page < 15; page++) {
-            const result = await syncCatalogue(env, { source: "play", force: true, enabled: scope.sources });
-            refreshed.push(result);
-            if (result.error || result.skipped || result.next == null) break;
-          }
-        }
+        else
+          refreshed.push(
+            await safeSyncCatalogue(env, {
+              source: "play",
+              force: true,
+              enabled: scope.sources,
+            }),
+          );
       } catch (error) {
         const at = nowIso();
-        await env.DB.prepare(
-          "UPDATE catalogue_sync SET last_error = ?, last_checked_at = ? WHERE source = 'play'",
-        ).bind(String(error.message).slice(0, 400), at).run();
+        try {
+          await env.DB.prepare(
+            "UPDATE catalogue_sync SET last_error = ?, last_checked_at = ? WHERE source = 'play'",
+          )
+            .bind(String(error.message).slice(0, 400), at)
+            .run();
+        } catch (statusError) {
+          console.error("Could not store Play source error", statusError.message);
+        }
         refreshed.push({ source: "play", error: error.message });
       }
     }

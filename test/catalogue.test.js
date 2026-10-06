@@ -389,7 +389,7 @@ test("Play Riftbound uses its public persisted operation and rejects GraphQL err
     const body = JSON.parse(options.body);
     assert.equal(body.operationName, "CompeteTournamentSearch");
     assert.deepEqual(body.variables.filter, { rb: {} });
-    assert.ok(body.extensions.persistedQuery.sha256Hash);
+    assert.equal(body.extensions.persistedQuery.sha256Hash, "9e2e6f2d6f9d08baac662f04222dfce639a327d0c41d7fcacc2d13d535daf55a");
     return Response.json(
       bad
         ? { errors: [{ message: "Unavailable" }] }
@@ -581,6 +581,15 @@ test("catalogue imports skip a leased source so other sources can progress", asy
   const result = await syncCatalogue(env);
   assert.equal(result.source, "uvs-stores");
   assert.equal(result.count, 0);
+});
+
+test("UVS catalogue pages use a larger bounded batch", async (t) => {
+  t.mock.method(globalThis, "fetch", async (url) => {
+    const parsed = new URL(url);
+    assert.equal(parsed.searchParams.get("page_size"), "50");
+    return Response.json({ results: [], next_page_number: null });
+  });
+  await fetchSourcePage("uvs-events");
 });
 
 test("source requests use Workers-compatible manual redirects and reject redirects", async (t) => {

@@ -34,12 +34,17 @@ export async function handleCatalogueApi(request, env) {
       return json({ refreshed: [], setup_required: true });
 
     const targets = [];
-    if (scope.sources.includes("uvs")) targets.push("uvs-events", "uvs-stores");
-    if (scope.sources.includes("play")) targets.push("play");
+    if (scope.sources.includes("uvs")) targets.push(["uvs-events", 3], ["uvs-stores", 3]);
+    if (scope.sources.includes("play")) targets.push(["play", 30]);
 
     const refreshed = [];
-    for (const source of targets)
-      refreshed.push(await syncCatalogue(env, { source, force: true, enabled: scope.sources }));
+    for (const [source, maxPages] of targets) {
+      for (let page = 0; page < maxPages; page++) {
+        const result = await syncCatalogue(env, { source, force: true, enabled: scope.sources });
+        refreshed.push(result);
+        if (result.error || result.skipped || result.next == null) break;
+      }
+    }
 
     return json({ refreshed });
   }

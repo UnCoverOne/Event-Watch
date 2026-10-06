@@ -242,10 +242,9 @@ export async function fetchSourcePage(source, cursor = null) {
   if (source === "play") {
     const data = await playQuery("CompeteTournamentSearch", {
       sport: "rb",
-      // Catalogue indexing must not invent a geographic origin. Play Riftbound
-      // accepts an empty filter for the global tournament listing; user country
-      // and city preferences are applied locally after records are indexed.
-      filter: {},
+      // Riftbound searches require the sport-specific filter namespace even
+      // when no geographic restriction is requested.
+      filter: { rb: {} },
       sortBy: {},
       first: 10,
       ...(cursor ? { after: cursor } : {}),

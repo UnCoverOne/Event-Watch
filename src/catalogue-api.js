@@ -8,6 +8,7 @@ import {
 } from "./adapters.js";
 import { catalogueStoreEvents, refreshCatalogueItem } from "./catalogue.js";
 import { normalizeCheckInterval } from "./schedule.js";
+import { CONNECTORS, getPreferences, savePreferences, browseScope, scopeConditions } from './browse-preferences.js';
 
 const KINDS = {
   event: ["events", "subscriptions", "event_id"],
@@ -17,14 +18,26 @@ export async function handleCatalogueApi(request, env) {
   const url = new URL(request.url),
     path = url.pathname,
     method = request.method;
+  if (path === '/api/catalogue/preferences') {
+    if (method === 'GET') {
+      const user = await currentUser(request, env);
+      return json({ user, preferences: await getPreferences(env, user), connectors: CONNECTORS });
+    }
+    if (method === 'PUT') {
+      const user = await requireUser(request, env);
+      return json({ preferences: await savePreferences(env, user, await readJson(request)) });
+    }
+  }
   if (method === "GET" && path === "/api/catalogue/sources") {
+    const scope = await browseScope(env, await currentUser(request, env), url.searchParams);
+    if (!scope?.sources.length) return json({ sources: [] });
     const sources =
       (
         await env.DB.prepare(
           "SELECT source, cursor, last_checked_at, last_completed_at, last_error FROM catalogue_sync",
         ).all()
       ).results || [];
-    return json({ sources });
+    return json({ sources: sources.filter(s => scope.sources.includes(s.source === 'play' ? 'play' : 'uvs')) });
   }
   if (method === "POST" && path === "/api/catalogue/resolve") {
     await requireUser(request, env);
@@ -118,6 +131,14 @@ export async function handleCatalogueApi(request, env) {
       throw new HttpError(401, "Sign in to sync and view your saved items.");
     const where = [],
       args = [user?.id || ""];
+    if (view === 'browse') {
+      const scope = await browseScope(env, user, p);
+      if (!scope?.sources.length)
+        return json({ items: [], total: 0, page: 1, pages: 0, setup_required: true });
+      const constraints = scopeConditions(scope, kind);
+      where.push(...constraints.where);
+      args.push(...constraints.args);
+    }
     if (view === "archive") where.push("s.archived = 1");
     else {
       if (view !== "browse") where.push("s.archived = 0");
@@ -218,16 +239,17 @@ export async function handleCatalogueApi(request, env) {
     });
   }
   if (method === "GET" && path === "/api/catalogue/filters") {
+    const scope = await browseScope(env, await currentUser(request, env), url.searchParams);
+    if (!scope?.sources.length) return json({ country: [], format: [], category: [] });
     const results = {};
-    for (const field of ["country", "format", "category"]) {
-      const query =
-        field === "country"
-          ? "SELECT country AS value FROM events WHERE country IS NOT NULL UNION SELECT country FROM lgs_stores WHERE country IS NOT NULL ORDER BY value"
-          : `SELECT DISTINCT ${field} AS value FROM events WHERE ${field} IS NOT NULL ORDER BY value`;
-      results[field] = ((await env.DB.prepare(query).all()).results || []).map(
+    const constraints = scopeConditions(scope, 'event');
+    for (const field of ["format", "category"]) {
+      const query = `SELECT DISTINCT e.${field} AS value FROM events e WHERE ${constraints.where.join(' AND ')} AND e.${field} IS NOT NULL ORDER BY value`;
+      results[field] = ((await env.DB.prepare(query).bind(...constraints.args).all()).results || []).map(
         (r) => r.value,
       );
     }
+    results.country = scope.country === '*' ? [] : [scope.country];
     return json(results);
   }
   const match = path.match(

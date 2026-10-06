@@ -1,4 +1,6 @@
 import { syncCatalogue } from "./catalogue.js";
+import { currentUser } from './auth.js';
+import { browseScope } from './browse-preferences.js';
 import { handleApi } from "./api.js";
 import { runChecks } from "./checker.js";
 import { HttpError, json } from "./utils.js";
@@ -11,7 +13,10 @@ export default {
         // Keep initial indexing moving when scheduled triggers are delayed.
         // The shared lease and refresh interval bound work across all visitors.
         if (request.method === "GET" && url.pathname === "/api/catalogue/sources")
-          ctx.waitUntil(syncCatalogue(env).catch((error) => console.error("Background catalogue sync failed", error)));
+          ctx.waitUntil((async () => {
+            const scope = await browseScope(env, await currentUser(request, env), url.searchParams);
+            if (scope?.sources.length) await syncCatalogue(env, { enabled: scope.sources });
+          })().catch((error) => console.error("Background catalogue sync failed", error)));
         return await handleApi(request, env);
       }
       return env.ASSETS.fetch(request);

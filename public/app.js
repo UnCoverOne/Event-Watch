@@ -1,6 +1,13 @@
 const $ = (id) => document.getElementById(id);
 const state = {
   user: null,
+  preferences: null,
+  connectors: [],
+  draftSources: [],
+  editingSources: false,
+  resultController: null,
+  resultCache: new Map(),
+  metadataCache: new Map(),
   mode: "login",
   view: "browse",
   kind: "event",
@@ -81,9 +88,13 @@ $("filterToggle").addEventListener("click", () => {
 });
 $("resetFilters").addEventListener("click", resetFilters);
 $("reloadButton").addEventListener("click", () => {
+  state.resultCache.clear();
+  state.metadataCache.clear();
   loadResults();
-  loadSourceStatus();
-  loadFilterOptions();
+  if (state.view === "browse" && state.preferences?.sources.length) {
+    loadSourceStatus();
+    loadFilterOptions();
+  }
 });
 $("previousPage").addEventListener("click", () => changePage(-1));
 $("nextPage").addEventListener("click", () => changePage(1));
@@ -187,18 +198,112 @@ $("content").addEventListener("change", (event) => {
   });
 });
 window.addEventListener("popstate", route);
+$("manageSources").addEventListener("click", showSourceSetup);
+$("cancelSources").addEventListener("click", route);
+$("addSource").addEventListener("click", () => {
+  $("sourceError").textContent = "";
+  try {
+    const url = new URL($("sourceUrl").value);
+    const connector = state.connectors.find(c => new URL(c.url).hostname === url.hostname && url.protocol === 'https:');
+    if (!connector) throw new Error("This website is not supported yet. Choose one of the available connectors below.");
+    addDraftSource(connector.id);
+    $("sourceUrl").value = "";
+  } catch (error) {
+    $("sourceError").textContent = error.message.includes('Invalid URL') ? 'Enter a valid HTTPS website URL.' : error.message;
+  }
+});
+$("availableSources").addEventListener("click", e => {
+  const button = e.target.closest('[data-add-source]');
+  if (button) addDraftSource(button.dataset.addSource);
+});
+$("configuredSources").addEventListener("click", e => {
+  const button = e.target.closest('[data-remove-source]');
+  if (button) {
+    state.draftSources = state.draftSources.filter(id => id !== button.dataset.removeSource);
+    renderDraftSources();
+  }
+});
+$("sourceSetupForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  $("setupError").textContent = "";
+  const preferences = { sources: [...state.draftSources], country: $("setupCountry").value, city: $("setupCity").value.trim() };
+  if (!preferences.country) { $("setupError").textContent = 'Choose a country first.'; return; }
+  $("saveSources").disabled = true;
+  try {
+    if (state.user) state.preferences = (await api('/api/catalogue/preferences', { method: 'PUT', body: preferences })).preferences;
+    else {
+      localStorage.setItem('event-watch-browse', JSON.stringify(preferences));
+      state.preferences = preferences;
+    }
+    state.resultCache.clear();
+    state.editingSources = false;
+    toast(preferences.sources.length ? 'Sources and location saved.' : 'All sources removed. Browsing is paused.');
+    navigate(new URL('/', location.origin));
+  } catch (error) { $("setupError").textContent = error.message; }
+  finally { $("saveSources").disabled = false; }
+});
+
+function readGuestPreferences() {
+  try {
+    const p = JSON.parse(localStorage.getItem('event-watch-browse'));
+    return p && Array.isArray(p.sources) && p.sources.every(id => ['uvs', 'play'].includes(id)) && /^(\*|[A-Z]{2})$/.test(p.country) ? p : null;
+  } catch { return null; }
+}
+async function loadPreferences() {
+  const data = await api('/api/catalogue/preferences');
+  state.user = data.user;
+  state.connectors = data.connectors || [];
+  state.preferences = state.user ? data.preferences : readGuestPreferences();
+}
+function scopeParams() {
+  const p = state.preferences;
+  return new URLSearchParams(p ? { sources: p.sources.join(','), region: p.country, city: p.city || '' } : {});
+}
+function showSourceSetup() {
+  state.editingSources = true;
+  state.request++;
+  state.resultController?.abort();
+  $("browseView").classList.add("hidden");
+  $("detailView").classList.add("hidden");
+  $("setupView").classList.remove("hidden");
+  $("results").innerHTML = "";
+  $("setupError").textContent = "";
+  $("sourceError").textContent = "";
+  $("setupStorage").textContent = state.user ? 'Saved to your account and synced across devices.' : 'Saved on this device. Sign in to sync your setup across devices.';
+  state.draftSources = [...(state.preferences?.sources || [])];
+  $("setupCountry").value = state.preferences?.country || '';
+  $("setupCity").value = state.preferences?.city || '';
+  $("cancelSources").classList.toggle('hidden', !state.preferences?.sources.length && state.view === 'browse');
+  renderDraftSources();
+}
+function addDraftSource(id) {
+  if (!state.draftSources.includes(id)) state.draftSources.push(id);
+  renderDraftSources();
+}
+function renderDraftSources() {
+  $("configuredSources").innerHTML = state.draftSources.length ? state.draftSources.map(id => {
+    const c = state.connectors.find(c => c.id === id);
+    return c ? `<div class="configured-source"><span>${esc(c.name)}<small class="muted">${esc(c.url)}</small></span><button class="link-button" type="button" data-remove-source="${esc(id)}" aria-label="Remove ${esc(c.name)}">Remove</button></div>` : '';
+  }).join('') : '<p class="muted">No sources added. No events will load until you add a source and save.</p>';
+  $("availableSources").innerHTML = state.connectors.map(c => `<button class="small-button" type="button" data-add-source="${esc(c.id)}" ${state.draftSources.includes(c.id) ? 'disabled' : ''}>${state.draftSources.includes(c.id) ? 'Added' : '+ Add'} ${esc(c.name)}</button>`).join('');
+}
+function populateCountries() {
+  const codes = 'AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW'.split(' ');
+  const options = codes.map(code => [countryName(code), code]).sort((a,b) => a[0].localeCompare(b[0]));
+  $("setupCountry").replaceChildren(new Option('Choose a country…', ''), ...options.map(([name, code]) => new Option(name, code)), new Option('Worldwide — all countries', '*'));
+}
 
 async function init() {
   syncTheme();
   try {
-    state.user = (await api("/api/me")).user;
+    await loadPreferences();
   } catch (error) {
     showError(error.message);
+    return;
   }
   renderSession();
-  await loadFilterOptions();
+  populateCountries();
   await route();
-  loadSourceStatus();
 }
 function navigate(url) {
   clearTimeout(searchTimer);
@@ -214,6 +319,9 @@ async function route() {
   state.page = Math.max(1, Number.parseInt(params.get("page"), 10) || 1);
   state.detail = null;
   state.request++;
+  state.resultController?.abort();
+  state.editingSources = false;
+  $("setupView").classList.add("hidden");
   $("appError").classList.add("hidden");
   document
     .querySelectorAll("[data-view]")
@@ -254,6 +362,7 @@ async function route() {
     }
     return loadDetail(state.kind, params.get("id"));
   }
+  if (state.view === "browse" && !state.preferences?.sources.length) return showSourceSetup();
   $("browseView").classList.remove("hidden");
   $("detailView").classList.add("hidden");
   if (state.view === "joined") state.kind = "event";
@@ -289,6 +398,19 @@ async function route() {
     el.value = value;
   }
   $("sortSelect").value = params.get("sort") || "date";
+  $("browseScope").classList.toggle("hidden", state.view !== "browse");
+  if (state.view === "browse") {
+    const pref = state.preferences;
+    $("browseScope").textContent = `${pref.sources.map(id => SOURCE[id] || id).join(" + ")} · ${pref.country === '*' ? 'Worldwide' : countryName(pref.country)}${pref.city ? ` · ${pref.city}` : ''}`;
+    $("sourceFilter").replaceChildren(new Option("All my sources", ""), ...pref.sources.map(id => new Option(SOURCE[id], id)));
+    $("sourceFilter").value = params.get("source") || "";
+    loadFilterOptions();
+    loadSourceStatus();
+  } else {
+    $("sourceStatus").textContent = "";
+    $("sourceFilter").replaceChildren(new Option("All saved sources", ""), ...Object.entries(SOURCE).map(([id, name]) => new Option(name, id)));
+    $("sourceFilter").value = params.get("source") || "";
+  }
   await loadResults();
 }
 function applyFilters() {
@@ -327,14 +449,17 @@ function changePage(delta) {
 }
 async function loadFilterOptions() {
   try {
-    const data = await api("/api/catalogue/filters");
+    const prefs = state.preferences;
+    if (!prefs?.sources.length) return;
+    const data = await metadata(`/api/catalogue/filters?${scopeParams()}`);
+    if (prefs !== state.preferences || state.editingSources || state.view !== "browse") return;
     for (const key of ["country", "format", "category"]) {
       const select = $(`${key}Filter`),
         value = select.value;
       select.replaceChildren(
         new Option(
           key === "country"
-            ? "All countries"
+            ? (prefs.country === '*' ? "All countries" : "My selected country")
             : key === "format"
               ? "All formats"
               : "All types",
@@ -348,6 +473,7 @@ async function loadFilterOptions() {
             option,
           ),
         );
+      if (value && ![...select.options].some(o => o.value === value)) select.add(new Option(pretty(value), value));
       if (value) select.value = value;
     }
   } catch {
@@ -356,7 +482,10 @@ async function loadFilterOptions() {
 }
 async function loadSourceStatus() {
   try {
-    const data = await api("/api/catalogue/sources");
+    const prefs = state.preferences;
+    if (!prefs?.sources.length) return;
+    const data = await metadata(`/api/catalogue/sources?${scopeParams()}`);
+    if (prefs !== state.preferences || state.editingSources || state.view !== "browse") return;
     $("sourceStatus").innerHTML =
       `${data.sources.some(s => !s.last_completed_at) ? "<div>Catalogue indexing is in progress. More events and stores will appear as sources are imported.</div>" : ""}<details><summary>Sources & freshness</summary>${data.sources
         .map((s) => {
@@ -376,7 +505,19 @@ async function loadSourceStatus() {
       "Source freshness is currently unavailable.";
   }
 }
+function metadata(url) {
+  const key = `${state.user?.id || 'guest'}:${url}`;
+  const cached = state.metadataCache.get(key);
+  if (cached && Date.now() - cached.at < 60000) return cached.promise;
+  if (state.metadataCache.size > 20) state.metadataCache.clear();
+  const promise = api(url).catch(error => { state.metadataCache.delete(key); throw error; });
+  state.metadataCache.set(key, { at: Date.now(), promise });
+  return promise;
+}
 async function loadResults() {
+  if (state.editingSources || (state.view === "browse" && !state.preferences?.sources.length)) return;
+  state.resultController?.abort();
+  state.resultController = new AbortController();
   const requestId = ++state.request;
   $("results").setAttribute("aria-busy", "true");
   $("appError").classList.add("hidden");
@@ -394,9 +535,15 @@ async function loadResults() {
     const params = new URL(location.href).searchParams;
     params.set("view", state.view);
     params.set("page", state.page);
-    const data = await api(
-      `/api/catalogue/${state.kind === "event" ? "events" : "stores"}?${params}`,
-    );
+    if (state.view === "browse") for (const [key, value] of scopeParams()) params.set(key, value);
+    const url = `/api/catalogue/${state.kind === "event" ? "events" : "stores"}?${params}`;
+    const cacheKey = `${state.user?.id || 'guest'}:${JSON.stringify(state.preferences)}:${url}`;
+    const cached = state.resultCache.get(cacheKey);
+    const data = cached && Date.now() - cached.at < 30000 ? cached.data : await api(url, { signal: state.resultController.signal });
+    if (requestId !== state.request) return;
+    if (state.resultCache.size > 30) state.resultCache.clear();
+    state.resultCache.set(cacheKey, { data, at: Date.now() });
+    if (data.setup_required) return showSourceSetup();
     if (requestId !== state.request) return;
     state.pages = data.pages;
     $("resultCount").textContent =
@@ -420,7 +567,7 @@ async function loadResults() {
         "Clear filters",
       );
   } catch (error) {
-    if (requestId !== state.request) return;
+    if (requestId !== state.request || error.name === "AbortError") return;
     showError(error.message);
     $("results").innerHTML = "";
     $("resultCount").textContent = "Results could not be loaded.";
@@ -469,6 +616,7 @@ function actions(item, kind) {
   return `<div class="card-actions">${button("bookmarked", item.bookmarked ? "★ Saved" : "☆ Save", !item.bookmarked, !!item.bookmarked)}${button("watching", item.watching ? "◉ Watching" : "◎ Watch", !item.watching, !!item.watching)}${kind === "event" ? button("joined", item.joined ? "✓ Joined" : "Mark joined", !item.joined, !!item.joined) : ""}${button("archived", item.archived ? "Restore" : "Archive", !item.archived, !!item.archived)}</div>`;
 }
 async function changeItemState(button) {
+  state.resultCache.clear();
   if (!state.user) return showAuth();
   button.disabled = true;
   try {
@@ -598,6 +746,8 @@ async function onAuthSubmit(event) {
       },
     });
     state.user = data.user;
+    await loadPreferences();
+    state.resultCache.clear();
     $("authForm").reset();
     $("authDialog").close();
     renderSession();
@@ -612,6 +762,8 @@ async function onLogout() {
   await disableDevicePush();
   await api("/api/auth/logout", { method: "POST" });
   state.user = null;
+  state.preferences = readGuestPreferences();
+  state.resultCache.clear();
   renderSession();
   await route();
 }
@@ -745,6 +897,7 @@ function toast(message) {
 async function api(url, options = {}) {
   const response = await fetch(url, {
     method: options.method || "GET",
+    signal: options.signal,
     headers:
       options.body !== undefined ? { "content-type": "application/json" } : {},
     ...(options.body !== undefined
@@ -759,7 +912,7 @@ async function api(url, options = {}) {
 if ("serviceWorker" in navigator)
   window.addEventListener("load", () =>
     navigator.serviceWorker
-      .register("/sw.js?build=2026-10-06-catalogue-v1", {
+      .register("/sw.js?build=2026-10-06-sources-v2", {
         scope: "/",
         updateViaCache: "none",
       })

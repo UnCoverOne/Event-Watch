@@ -1,10 +1,11 @@
 # Event Watch
 
-A Cloudflare-hosted event browsing and monitoring client. Browse events and stores without an account, then sign in to sync bookmarks, watches, joined events and archives across devices.
+A Cloudflare-hosted event browsing and monitoring client. Choose your event websites and location before browsing. Sign in to sync your setup, bookmarks, watches, joined events and archives across devices.
 
 ## Features
 
-- One searchable catalogue for UVS / Riftbound Gaming Network and Play Riftbound.
+- User-managed sources: add/remove UVS / Riftbound Gaming Network and Play Riftbound through **Sources & location**, by website URL or connector button. Accounts start with no sources enabled.
+- Required country choice (including an explicit Worldwide option) and optional city, saved to the account or locally for guests. No browse requests before setup. Removing all sources pauses browsing.
 - Events and stores, source filters, country and location search, event dates, format, event type, availability and entry fee filters; paginated date, name, location and recently-added sorting.
 - Public detail pages and internal navigation from stores to their events.
 - Independent bookmarks and watches. Joining an event pauses its availability alerts. Archiving an item pauses its notifications while preserving its other settings.
@@ -14,6 +15,10 @@ A Cloudflare-hosted event browsing and monitoring client. Browse events and stor
 - Installable PWA, dark/light themes and responsive layouts.
 
 ## Source adapters and freshness
+
+Source connectors are supported integrations, not automatically enabled account subscriptions. Arbitrary websites still need a connector; unsupported source URLs show an explanation instead of being silently imported. Personal source/location preferences constrain browse queries on the server. They do not hide existing bookmarks, watches or archives, nor change notification subscriptions.
+
+Startup loads account/setup information in one request, then requests only the selected catalogue scope. Filter metadata and source freshness load independently. Country indexes avoid scanning unrelated regions; client result pages are cached for 30 seconds and metadata for 60 seconds. Refresh bypasses those caches, and changing saved item state invalidates result pages. Superseded search requests are cancelled. Browsing uses shared indexed records, never waits for an upstream import, and source-status background imports only advance selected connectors.
 
 `src/sources.js` contains the two structured public integrations:
 
@@ -62,7 +67,7 @@ npm run db:migrate:remote
 npm run deploy
 ```
 
-Keep the existing D1 binding and `APP_ORIGIN` in `wrangler.jsonc`. Migrations `0006_catalogue.sql` and `0007_legacy_event_dates.sql` are additive and preserve existing primary keys, account credentials, sessions, refresh intervals and archived watches. Never replace the production database with a new empty one.
+Keep the existing D1 binding and `APP_ORIGIN` in `wrangler.jsonc`. Migrations `0006_catalogue.sql`, `0007_legacy_event_dates.sql`, and `0008_browse_preferences.sql` are additive and preserve existing primary keys, account credentials, sessions, refresh intervals and archived watches. Never replace the production database with a new empty one.
 
 Before a production migration, retain a D1 backup / Time Travel recovery point. To recover a failed release, redeploy the previous Worker version; if reverting database changes is necessary, restore the matching database recovery point. The old interface does not understand bookmark-only or joined records, so a rollback after users have begun using the new states requires care rather than continued use of the old dashboard.
 

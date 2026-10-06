@@ -36,6 +36,7 @@ async function fixture() {
   db.exec(
     "INSERT INTO users (id,email,password_hash,created_at,updated_at) VALUES ('u','u@example.com','hash','2020','2020'), ('v','v@example.com','hash','2020','2020')",
   );
+  db.prepare('INSERT INTO user_browse_preferences (user_id, config, updated_at) VALUES (?, ?, ?)').run('u', JSON.stringify({sources: ['uvs', 'play',], country: '*', city: ''}), '2020');
   db.prepare(
     "INSERT INTO sessions (id,user_id,token_hash,expires_at,created_at) VALUES (?,?,?,?,?)",
   ).run("session", "u", await sha256("token"), "2099", "2020");
@@ -141,21 +142,21 @@ test("guest browsing, combined filters, pagination and literal search", async ()
   const { env, db, request } = await fixture();
   for (let n = 0; n < 26; n++)
     await saveRecord(env, "event", uvsEvent(raw(100 + n)));
-  let data = await request("/api/catalogue/events", "GET", undefined, false);
+  let data = await request("/api/catalogue/events?sources=uvs,play&region=*", "GET", undefined, false);
   assert.equal(data.total, 26);
   assert.equal(data.items.length, 24);
   assert.equal(data.pages, 2);
   data = await request(
-    "/api/catalogue/events?page=2&country=GB&format=Constructed&price=free&status=AVAILABLE",
+    "/api/catalogue/events?sources=uvs,play&region=*&page=2&country=GB&format=Constructed&price=free&status=AVAILABLE",
     "GET",
     undefined,
     false,
   );
   assert.equal(data.items.length, 2);
-  data = await request("/api/catalogue/events?q=%25", "GET", undefined, false);
+  data = await request("/api/catalogue/events?sources=uvs,play&region=*&q=%25", "GET", undefined, false);
   assert.equal(data.total, 0);
   data = await request(
-    "/api/catalogue/stores?q=London",
+    "/api/catalogue/stores?sources=uvs,play&region=*&q=London",
     "GET",
     undefined,
     false,
@@ -533,4 +534,37 @@ test("source requests use Workers-compatible manual redirects and reject redirec
     });
   });
   await assert.rejects(fetchSourcePage("uvs-events"), /HTTP 302/);
+});
+
+test('browse setup is required and account sources and country constrain all browse results', async () => {
+  const { db, env, request } = await fixture();
+  const id = await saveRecord(env, 'event', uvsEvent(raw(801)));
+  const foreign = await saveRecord(env, 'event', uvsEvent(raw(802)));
+  db.prepare('UPDATE events SET country = ? WHERE id = ?').run('US', foreign);
+  await request(`/api/catalogue/event/${foreign}/state`, 'PATCH', {bookmarked: true});
+  db.exec('DELETE FROM user_browse_preferences');
+  for (const authenticated of [true, false]) {
+    const empty = await request('/api/catalogue/events', 'GET', undefined, authenticated);
+    assert.equal(empty.setup_required, true);
+    assert.equal(empty.total, 0);
+  }
+  await request('/api/catalogue/preferences', 'PUT', {sources: ['uvs'], country: 'GB', city: 'London'});
+  const saved = await request('/api/catalogue/preferences');
+  assert.deepEqual(saved.preferences, {sources: ['uvs'], country: 'GB', city: 'London'});
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM user_browse_preferences WHERE user_id='v'").get().n, 0);
+  const results = await request('/api/catalogue/events?sources=play&region=US');
+  assert.deepEqual(results.items.map(e => e.id), [id]);
+  assert.equal((await request('/api/catalogue/events?country=US')).total, 0);
+  assert.equal((await request('/api/catalogue/events?source=play')).total, 0);
+  // Saved collections remain accessible even outside the browsing scope.
+  assert.equal((await request('/api/catalogue/events?view=bookmarks')).total, 1);
+  assert.deepEqual((await request('/api/catalogue/filters')).country, ['GB']);
+  assert.deepEqual((await request('/api/catalogue/sources')).sources.map(s => s.source).sort(), ['uvs-events', 'uvs-stores']);
+  await request('/api/catalogue/preferences', 'PUT', {sources: [], country: 'GB'});
+  assert.equal((await request('/api/catalogue/events')).setup_required, true);
+  assert.equal((await request('/api/catalogue/events?view=bookmarks')).total, 1);
+  await assert.rejects(request('/api/catalogue/preferences', 'PUT', {sources:['uvs'], country:'GB'}, false), e => e.status === 401);
+  await assert.rejects(request('/api/catalogue/preferences', 'PUT', {sources:['https://unknown.example'], country:'GB'}), e => e.status === 400);
+  await assert.rejects(request('/api/catalogue/preferences', 'PUT', {sources:['uvs']}), e => e.status === 400);
+  db.close();
 });

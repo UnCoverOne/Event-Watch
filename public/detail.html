@@ -31,7 +31,7 @@
       href="/icons/icon-192.png?v=2"
     />
     <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
-    <link rel="stylesheet" href="/styles.css?v=1.0" />
+    <link rel="stylesheet" href="/styles.css?v=1.1" />
   </head>
   <body>
     <a class="skip-link" href="#content">Skip to content</a>
@@ -78,6 +78,7 @@
               ><span aria-hidden="true">▤</span> Archive</a
             >
           </nav>
+          <button id="manageSources" class="small-button" type="button">Sources & location</button>
           <div class="sidebar-bottom">
             <p id="accountLine" class="muted">
               Browse freely. Sign in to save and sync.
@@ -95,7 +96,31 @@
             </button>
           </div>
           <div id="appError" class="notice error hidden" role="alert"></div>
-          <section id="browseView">
+          <section id="setupView" class="panel setup-panel hidden">
+            <p class="eyebrow">Your sources. Your area.</p>
+            <h1>Set up your event browser.</h1>
+            <p>Choose where to look before loading events or stores.</p>
+            <p id="setupStorage" class="muted"></p>
+            <form id="sourceSetupForm" class="stack">
+              <fieldset><legend>1. Add event websites</legend>
+                <div id="configuredSources" class="stack"></div>
+                <label>Website URL<input id="sourceUrl" type="url" placeholder="https://…" /></label>
+                <button id="addSource" class="small-button" type="button">Add source</button>
+                <p class="hint">Available connectors</p>
+                <div id="availableSources" class="source-choices"></div>
+                <p id="sourceError" class="error" role="alert"></p>
+              </fieldset>
+              <fieldset><legend>2. Choose your location</legend>
+                <label>Country<select id="setupCountry" required><option value="">Choose a country…</option></select></label>
+                <label>City (optional)<input id="setupCity" maxlength="100" placeholder="Any city in your selected country" /></label>
+              </fieldset>
+              <p class="hint">You can refine dates, format, availability and price after setup. Removing a source does not delete bookmarks or stop existing watches.</p>
+              <div class="source-choices"><button id="saveSources" class="primary" type="submit">Save & browse</button><button id="cancelSources" class="link-button" type="button">Cancel</button></div>
+              <p id="setupError" class="error" role="alert"></p>
+            </form>
+          </section>
+          <section id="browseView" class="hidden">
+            <p id="browseScope" class="notice"></p>
             <div class="page-heading">
               <div>
                 <p class="eyebrow" id="pageEyebrow">
@@ -209,7 +234,7 @@
               aria-live="polite"
             ></div>
             <div class="result-toolbar">
-              <p id="resultCount" role="status">Loading events…</p>
+              <p id="resultCount" role="status"></p>
               <label class="sort-label"
                 >Sort<select id="sortSelect">
                   <option value="date">Soonest first</option>
@@ -340,6 +365,6 @@
       <p id="notificationStatus" class="hint" role="status"></p>
     </dialog>
     <div id="toast" class="toast hidden" role="status"></div>
-    <script type="module" src="/app.js?v=1.0"></script>
+    <script type="module" src="/app.js?v=1.1"></script>
   </body>
 </html>

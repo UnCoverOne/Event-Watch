@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
+import { CONNECTORS } from '../src/browse-preferences.js';
 const html = readFileSync(
   new URL("../public/index.html", import.meta.url),
   "utf8",
@@ -25,13 +26,15 @@ const item = {
   joined: 0,
   archived: 0,
 };
-async function setup({ guest = false } = {}) {
+async function setup({ guest = false, configured = true, slowFilters = false } = {}) {
   const dom = new JSDOM(html, {
     url: "https://event-watch.test/",
     runScripts: "outside-only",
     pretendToBeVisual: true,
   });
   const { window } = dom;
+  let preferences = configured ? { sources: ['uvs', 'play'], country: 'GB', city: '' } : null;
+  if (guest && preferences) window.localStorage.setItem('event-watch-browse', JSON.stringify(preferences));
   const calls = [];
   let current = { ...item };
   window.HTMLDialogElement.prototype.showModal = function () {
@@ -43,15 +46,21 @@ async function setup({ guest = false } = {}) {
   window.fetch = async (url, options = {}) => {
     calls.push([url, options]);
     let data = {};
-    if (url === "/api/me")
+    if (url === "/api/catalogue/preferences") {
+      if (options.method === 'PUT') preferences = JSON.parse(options.body);
       data = {
         user: guest
           ? null
           : { id: "u", email: "u@example.test", emailVerified: true },
+        preferences: guest ? null : preferences,
+        connectors: CONNECTORS,
       };
-    else if (url === "/api/catalogue/filters")
+    }
+    else if (url.startsWith("/api/catalogue/filters?")) {
+      if (slowFilters) return new Promise(() => {});
       data = { country: ["GB"], format: ["Constructed"], category: ["LOCALS"] };
-    else if (url === "/api/catalogue/sources") data = { sources: [] };
+    }
+    else if (url.startsWith("/api/catalogue/sources?")) data = { sources: [] };
     else if (url.startsWith("/api/catalogue/events?"))
       data = { items: [current], total: 1, page: 1, pages: 1 };
     else if (url === "/api/catalogue/event/e1/state") {
@@ -155,4 +164,54 @@ test("filters and source selection are reflected in server queries", async () =>
   } finally {
     app.close();
   }
+});
+
+test('new visitors choose sources and location before any catalogue requests', async () => {
+  for (const guest of [true, false]) {
+    const app = await setup({ guest, configured: false });
+    try {
+      assert.equal(app.document.querySelector('#setupView').classList.contains('hidden'), false);
+      assert.equal(app.calls.some(([url]) => /catalogue\/(events|stores|filters|sources)\?/.test(url)), false);
+      app.document.querySelector('[data-add-source=uvs]').click();
+      await app.settle();
+      assert.equal(app.calls.some(([url]) => url.startsWith('/api/catalogue/events?')), false);
+      app.document.querySelector('#setupCountry').value = 'RO';
+      app.document.querySelector('#setupCity').value = 'București';
+      app.document.querySelector('#sourceSetupForm').dispatchEvent(new app.window.Event('submit', { bubbles: true, cancelable: true }));
+      await app.settle();
+      const query = app.calls.find(([url]) => url.startsWith('/api/catalogue/events?'))[0];
+      assert.match(query, /sources=uvs/);
+      assert.match(query, /region=RO/);
+      assert.equal(new URL(query, 'https://test').searchParams.get('city'), 'București');
+      assert.equal(app.calls.some(([url, opts]) => url === '/api/catalogue/preferences' && opts.method === 'PUT'), !guest);
+    } finally { app.close(); }
+  }
+});
+
+test('event results do not wait for filter metadata; repeated routes reuse recent results', async () => {
+  const app = await setup({ slowFilters: true });
+  try {
+    assert.match(app.document.querySelector('#results').textContent, /Nexus Night/);
+    const before = app.calls.filter(([url]) => url.startsWith('/api/catalogue/events?')).length;
+    app.document.querySelector('[data-view=browse]').click();
+    await app.settle();
+    assert.equal(app.calls.filter(([url]) => url.startsWith('/api/catalogue/events?')).length, before);
+  } finally { app.close(); }
+});
+
+test('removing the last source pauses browsing and unsupported websites are rejected', async () => {
+  const app = await setup();
+  try {
+    app.document.querySelector('#manageSources').click();
+    app.document.querySelector('#sourceUrl').value = 'https://unsupported.example/events';
+    app.document.querySelector('#addSource').click();
+    assert.match(app.document.querySelector('#sourceError').textContent, /not supported/);
+    app.document.querySelector('[data-remove-source=uvs]').click();
+    app.document.querySelector('[data-remove-source=play]').click();
+    const before = app.calls.filter(([url]) => url.startsWith('/api/catalogue/events?')).length;
+    app.document.querySelector('#sourceSetupForm').dispatchEvent(new app.window.Event('submit', { bubbles: true, cancelable: true }));
+    await app.settle();
+    assert.equal(app.calls.filter(([url]) => url.startsWith('/api/catalogue/events?')).length, before);
+    assert.equal(app.document.querySelector('#setupView').classList.contains('hidden'), false);
+  } finally { app.close(); }
 });

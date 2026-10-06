@@ -843,3 +843,12 @@ dialog .tab {
     scroll-behavior: auto !important;
   }
 }
+
+.setup-panel { padding: clamp(20px, 4vw, 40px); max-width: 740px; }
+.setup-panel h1 { font-size: clamp(26px, 4vw, 40px); }
+.setup-panel fieldset { border: 1px solid var(--border, #303238); border-radius: 12px; padding: 20px; display: grid; gap: 14px; min-width: 0; }
+.setup-panel legend { padding: 0 8px; font-weight: 600; }
+.source-choices { display: flex; flex-wrap: wrap; gap: 10px; }
+.configured-source { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border, #303238); padding: 8px 0; }
+.configured-source small { display: block; overflow-wrap: anywhere; }
+#manageSources { margin-top: 20px; width: 100%; }

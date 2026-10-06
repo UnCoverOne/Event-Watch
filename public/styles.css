@@ -6,22 +6,24 @@
   --text: #f4f5f7;
   --muted: #a1a6af;
   --line: #2c3037;
-  --accent: #a7ed95;
-  --accent-text: #13230f;
+  --accent: #cdb4ff;
+  --accent-text: #281540;
+  --accent-ink: #cdb4ff;
   --danger: #ff9999;
   --input: #101215;
   --shadow: rgba(0, 0, 0, 0.2);
 }
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #f5f6f2;
+  --bg: #f7f5fb;
   --surface: #fff;
-  --surface-2: #ecefe7;
-  --text: #1b211b;
-  --muted: #626b60;
-  --line: #dce1d8;
-  --accent: #305d24;
-  --accent-text: #fff;
+  --surface-2: #efebf6;
+  --text: #241d30;
+  --muted: #6b6278;
+  --line: #e0d9eb;
+  --accent: #cdb4ff;
+  --accent-text: #281540;
+  --accent-ink: #7443a6;
   --danger: #a52626;
   --input: #fff;
   --shadow: rgba(0, 0, 0, 0.04);
@@ -68,7 +70,7 @@ button:focus-visible,
 a:focus-visible,
 input:focus-visible,
 select:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent-ink);
   outline-offset: 4px;
 }
 input,
@@ -157,7 +159,7 @@ p {
   white-space: nowrap;
 }
 .dot {
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 .top-actions {
   display: flex;
@@ -192,8 +194,8 @@ p {
   border-color: var(--muted);
 }
 .small-button[aria-pressed="true"] {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--accent-ink);
+  color: var(--accent-ink);
 }
 .workspace {
   display: grid;
@@ -236,7 +238,7 @@ p {
   text-align: center;
 }
 .sidebar nav a[aria-current="page"] {
-  color: var(--accent);
+  color: var(--accent-ink);
   background: var(--surface-2);
   font-weight: 650;
 }
@@ -415,7 +417,7 @@ main {
   background: var(--muted);
 }
 .status.available {
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 .status.available:before {
   background: var(--accent);
@@ -439,7 +441,7 @@ main {
 }
 .card-date {
   font-size: 12px;
-  color: var(--accent);
+  color: var(--accent-ink);
   margin-bottom: 8px;
 }
 .card-location {
@@ -461,7 +463,7 @@ main {
   color: var(--muted);
 }
 .tag.saved {
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 .card-actions {
   display: flex;
@@ -596,7 +598,7 @@ main {
 .check-option input {
   width: 16px;
   height: 16px;
-  accent-color: var(--accent);
+  accent-color: var(--accent-ink);
 }
 footer {
   display: flex;
@@ -664,7 +666,7 @@ dialog .tab {
 .notification-option input {
   width: 20px;
   height: 20px;
-  accent-color: var(--accent);
+  accent-color: var(--accent-ink);
 }
 .toast {
   position: fixed;
@@ -846,9 +848,48 @@ dialog .tab {
 
 .setup-panel { padding: clamp(20px, 4vw, 40px); max-width: 740px; }
 .setup-panel h1 { font-size: clamp(26px, 4vw, 40px); }
-.setup-panel fieldset { border: 1px solid var(--border, #303238); border-radius: 12px; padding: 20px; display: grid; gap: 14px; min-width: 0; }
+.setup-panel fieldset { border: 1px solid var(--line); border-radius: 12px; padding: 20px; display: grid; gap: 14px; min-width: 0; }
 .setup-panel legend { padding: 0 8px; font-weight: 600; }
 .source-choices { display: flex; flex-wrap: wrap; gap: 10px; }
-.configured-source { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border, #303238); padding: 8px 0; }
+.configured-source { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); padding: 8px 0; }
 .configured-source small { display: block; overflow-wrap: anywhere; }
 #manageSources { margin-top: 20px; width: 100%; }
+
+/* Compact account controls and restrained motion. */
+.theme-control { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.theme-switch { position: relative; width: 44px; height: 26px; border: 1px solid var(--line); border-radius: 20px; background: var(--surface-2); padding: 3px; flex-shrink: 0; }
+.theme-switch[aria-checked="true"] { background: var(--accent); border-color: var(--accent); }
+.theme-thumb { display: block; width: 18px; height: 18px; border-radius: 50%; background: var(--text); transform: translateX(0); transition: transform 180ms ease, background-color 180ms ease; }
+.theme-switch[aria-checked="true"] .theme-thumb { transform: translateX(18px); background: var(--accent-text); }
+.profile-control { position: relative; }
+.profile-button { display: flex; align-items: center; gap: 9px; background: var(--surface-2); color: var(--text); border: 1px solid var(--line); padding: 9px 12px; }
+.menu-chevron { transition: transform 160ms ease; }
+.profile-button[aria-expanded="true"] .menu-chevron { transform: rotate(180deg); }
+.profile-menu { position: absolute; right: 0; top: calc(100% + 10px); min-width: 180px; padding: 6px; z-index: 30; box-shadow: 0 12px 32px var(--shadow); transform-origin: top right; animation: menu-in 150ms ease-out; }
+.profile-menu button { display: block; width: 100%; text-align: left; padding: 10px 12px; border: 0; background: transparent; color: var(--text); }
+.profile-menu button:hover, .profile-menu button:focus-visible { background: var(--surface-2); }
+.profile-facts { margin: 0 0 24px; }
+.profile-facts dt { font-size: 12px; color: var(--muted); }
+.profile-facts dd { margin: 4px 0 16px; overflow-wrap: anywhere; }
+.settings-section-title { margin: 24px 0 10px; }
+body, .panel, input, select, button, .sidebar nav a { transition: background-color 160ms ease, color 160ms ease, border-color 160ms ease, box-shadow 160ms ease; }
+button:active:not(:disabled) { transform: translateY(1px); }
+.result-card { transition: border-color 160ms ease, transform 160ms ease; animation: content-in 180ms ease-out; }
+.result-card:hover { transform: translateY(-2px); }
+#setupView, #browseView, #detailView, .filters:not(.hidden) { animation: content-in 180ms ease-out; }
+dialog[open] { animation: menu-in 180ms ease-out; }
+dialog[open]::backdrop { animation: fade-in 160ms ease-out; }
+.toast:not(.hidden) { animation: content-in 160ms ease-out; }
+@keyframes content-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes menu-in { from { opacity: 0; transform: translateY(-4px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@media (max-width: 540px) {
+  .top-actions { gap: 12px; }
+  .profile-button > span:not(.menu-chevron) { display: none; }
+  .profile-button { gap: 5px; padding: 8px; }
+  .theme-control { gap: 5px; font-size: 11px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  .result-card:hover, button:active:not(:disabled) { transform: none; }
+}

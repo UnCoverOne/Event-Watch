@@ -215,3 +215,51 @@ test('removing the last source pauses browsing and unsupported websites are reje
     assert.equal(app.document.querySelector('#setupView').classList.contains('hidden'), false);
   } finally { app.close(); }
 });
+
+test('profile menu supports dismissal and opens Profile and guest Settings', async () => {
+  const app = await setup({ guest: true, configured: false });
+  try {
+    const button = app.document.querySelector('#profileButton');
+    button.click();
+    assert.equal(button.getAttribute('aria-expanded'), 'true');
+    assert.equal(app.document.activeElement.id, 'profileMenuItem');
+    app.document.dispatchEvent(new app.window.KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
+    assert.equal(button.getAttribute('aria-expanded'), 'false');
+    assert.equal(app.document.activeElement, button);
+    button.click();
+    app.document.querySelector('#profileMenuItem').click();
+    assert.equal(app.document.querySelector('#profileDialog').open, true);
+    assert.equal(app.document.querySelector('#profileEmail').textContent, 'Guest');
+    app.document.querySelector('[data-close=profileDialog]').click();
+    button.click();
+    app.document.querySelector('#settingsButton').click();
+    assert.equal(app.document.querySelector('#notificationSettings').open, true);
+    assert.equal(app.document.querySelector('#notificationControls').classList.contains('hidden'), true);
+    assert.equal(app.calls.some(([url]) => url === '/api/settings/notifications'), false);
+    app.document.querySelector('#closeSettings').click();
+    button.click();
+    app.document.querySelector('#content').click();
+    assert.equal(button.getAttribute('aria-expanded'), 'false');
+  } finally { app.close(); }
+});
+
+test('theme switch exposes and persists the selected theme without losing its thumb', async () => {
+  const app = await setup();
+  try {
+    const toggle = app.document.querySelector('#themeToggle');
+    assert.equal(toggle.getAttribute('role'), 'switch');
+    assert.equal(toggle.getAttribute('aria-checked'), 'true');
+    toggle.click();
+    assert.equal(toggle.getAttribute('aria-checked'), 'false');
+    assert.equal(app.document.documentElement.dataset.theme, 'light');
+    assert.equal(app.window.localStorage.getItem('event-watch-theme'), 'light');
+    assert.ok(toggle.querySelector('.theme-thumb'));
+    toggle.click();
+    assert.equal(toggle.getAttribute('aria-checked'), 'true');
+    assert.equal(app.window.localStorage.getItem('event-watch-theme'), 'dark');
+    app.document.querySelector('#profileButton').click();
+    app.document.querySelector('#profileMenuItem').click();
+    assert.equal(app.document.querySelector('#profileEmail').textContent, 'u@example.test');
+    assert.equal(app.document.querySelector('#profileVerification').textContent, 'Verified');
+  } finally { app.close(); }
+});

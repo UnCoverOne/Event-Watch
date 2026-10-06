@@ -18,26 +18,7 @@ const state = {
 };
 const INTERVALS = [5, 10, 15, 30, 60, 180, 360, 720, 1440];
 const LABELS = {
-  browse: [
-    "Find your next event.",
-    "Explore events and stores across the Riftbound community.",
-  ],
-  bookmarks: [
-    "Worth coming back to.",
-    "Your saved events and stores. Bookmarks do not enable notifications.",
-  ],
-  watching: [
-    "Keep an eye on it.",
-    "Registration openings, available places and new events at your favourite stores.",
-  ],
-  joined: [
-    "See you there.",
-    "Events you have marked as joined. Availability alerts are paused.",
-  ],
-  archive: [
-    "Kept for the record.",
-    "Archived events and stores stay saved, with all their watch alerts paused.",
-  ],
+  browse: ['Browse'], bookmarks: ['Bookmarks'], watching: ['Watching'], joined: ['Joined'], archive: ['Archive'],
 };
 const SOURCE = {
   uvs: "UVS Gaming Network",
@@ -56,6 +37,43 @@ const FILTERS = [
   "when",
 ];
 let toastTimer, searchTimer;
+
+function closeProfileMenu(restoreFocus = false) {
+  $("profileMenu").classList.add("hidden");
+  $("profileButton").setAttribute("aria-expanded", "false");
+  if (restoreFocus) $("profileButton").focus();
+}
+$("profileButton").addEventListener("click", () => {
+  const open = $("profileButton").getAttribute("aria-expanded") !== "true";
+  $("profileMenu").classList.toggle("hidden", !open);
+  $("profileButton").setAttribute("aria-expanded", String(open));
+  if (open) $("profileMenuItem").focus();
+});
+document.addEventListener("click", event => {
+  if (!event.target.closest('.profile-control')) closeProfileMenu();
+});
+document.addEventListener("keydown", event => {
+  if (event.key === 'Escape' && !$("profileMenu").classList.contains('hidden')) {
+    event.preventDefault(); closeProfileMenu(true);
+  }
+});
+document.addEventListener('focusin', event => {
+  if (!event.target.closest('.profile-control')) closeProfileMenu();
+});
+$("profileMenuItem").addEventListener("click", () => {
+  closeProfileMenu();
+  $("profileDialog").showModal();
+});
+function openAppSettings() {
+  closeProfileMenu();
+  $("guestSettings").classList.toggle('hidden', !!state.user);
+  $("notificationControls").classList.toggle('hidden', !state.user);
+  if (state.user) openNotificationSettings();
+  else $("notificationSettings").showModal();
+}
+$("settingsSources").addEventListener('click', () => {
+  $("notificationSettings").close(); showSourceSetup();
+});
 
 $("navigation").addEventListener("click", (event) => {
   const link = event.target.closest("[data-view]");
@@ -102,7 +120,7 @@ $("emptyAction").addEventListener("click", () => {
   if (!state.user && state.view !== "browse") showAuth();
   else resetFilters();
 });
-$("signInButton").addEventListener("click", showAuth);
+$("signInButton").addEventListener("click", () => { $("profileDialog").close(); showAuth(); });
 $("logoutButton").addEventListener("click", () => runAction(onLogout));
 $("loginTab").addEventListener("click", () => setAuthMode("login"));
 $("registerTab").addEventListener("click", () => setAuthMode("register"));
@@ -131,7 +149,7 @@ document
   .forEach((button) =>
     button.addEventListener("click", () => $(button.dataset.close).close()),
   );
-$("settingsButton").addEventListener("click", openNotificationSettings);
+$("settingsButton").addEventListener("click", openAppSettings);
 $("closeSettings").addEventListener("click", () =>
   $("notificationSettings").close(),
 );
@@ -367,11 +385,6 @@ async function route() {
   $("detailView").classList.add("hidden");
   if (state.view === "joined") state.kind = "event";
   $("pageTitle").textContent = LABELS[state.view][0];
-  $("pageDescription").textContent = LABELS[state.view][1];
-  $("pageEyebrow").textContent =
-    state.view === "browse"
-      ? "One place. More possibilities."
-      : "Your Event Watch";
   document.title = `${state.view === "browse" ? "Browse" : pretty(state.view)} | Event Watch`;
   $("kindTabs").classList.toggle("hidden", state.view === "joined");
   document.querySelectorAll("#kindTabs button").forEach((b) => {
@@ -654,7 +667,7 @@ async function loadDetail(kind, id) {
       : [{ source: item.source, url: item.event_url || item.store_url }];
     $("detailView").innerHTML =
       `<a class="detail-back" data-internal href="/?view=${state.view}&kind=${kind}">← Back to ${state.view === "browse" ? "browse" : state.view}</a>
-      <p class="eyebrow">${kind === "event" ? "Event" : "Store"} details</p>${kind === "event" ? status(item.status) : ""}<h1 class="detail-title">${esc(item.title || "Untitled listing")}</h1>
+      ${kind === "event" ? status(item.status) : ""}<h1 class="detail-title">${esc(item.title || "Untitled listing")}</h1>
       <p class="lede">${esc(item.address || item.host_lgs || "")}</p>
       <div class="detail-layout"><div><section class="panel detail-section"><h2>At a glance</h2><dl class="detail-facts">
       ${kind === "event" ? fact("When", dateTime(item.starts_at || item.event_date)) + fact("Store", item.host_lgs || "Not listed", item.store_id ? detailUrl("store", item.store_id) : null) + fact("Format", pretty(item.format || "Not listed")) + fact("Event type", pretty(item.category || "Not listed")) + fact("Entry fee", price(item) || "Not listed") + fact("Players", item.capacity != null ? `${item.current_players ?? "?"} / ${item.capacity}` : "Not published") : fact("Location", item.address || "Not listed") + fact("Country", item.country ? countryName(item.country) : "Not listed")}
@@ -761,6 +774,7 @@ async function onAuthSubmit(event) {
 async function onLogout() {
   await disableDevicePush();
   await api("/api/auth/logout", { method: "POST" });
+  $("profileDialog").close();
   state.user = null;
   state.preferences = readGuestPreferences();
   state.resultCache.clear();
@@ -769,10 +783,11 @@ async function onLogout() {
 }
 function renderSession() {
   $("signInButton").classList.toggle("hidden", !!state.user);
-  $("settingsButton").classList.toggle("hidden", !state.user);
+  $("profileEmail").textContent = state.user?.email || "Guest";
+  $("profileVerification").textContent = !state.user ? "Not signed in" : state.user.emailVerified ? "Verified" : "Awaiting verification";
   $("logoutButton").classList.toggle("hidden", !state.user);
   $("accountLine").textContent =
-    state.user?.email || "Browse freely. Sign in to save and sync.";
+    state.user?.email || "";
   $("verificationBox").classList.toggle(
     "hidden",
     !state.user || state.user.emailVerified,
@@ -799,10 +814,10 @@ async function onAddLink(event) {
 }
 function syncTheme() {
   const dark = document.documentElement.dataset.theme === "dark";
-  $("themeToggle").textContent = dark ? "Light mode" : "Dark mode";
+  $("themeToggle").setAttribute("aria-checked", String(dark));
   document.querySelector('meta[name="theme-color"]').content = dark
     ? "#0c0d0f"
-    : "#f5f6f2";
+    : "#f7f5fb";
 }
 function status(value) {
   return `<span class="status ${value === "AVAILABLE" ? "available" : value === "FULL" ? "full" : value === "NOT_OPEN" ? "not-open" : ""}">${esc({ AVAILABLE: "Available", FULL: "Full", NOT_OPEN: "Not open yet", CLOSED: "Closed", UNAVAILABLE: "Unavailable", UNKNOWN: "Unknown" }[value] || "Unknown")}</span>`;
@@ -912,7 +927,7 @@ async function api(url, options = {}) {
 if ("serviceWorker" in navigator)
   window.addEventListener("load", () =>
     navigator.serviceWorker
-      .register("/sw.js?build=2026-10-06-sources-v2", {
+      .register("/sw.js?build=2026-10-06-polish-v3", {
         scope: "/",
         updateViaCache: "none",
       })

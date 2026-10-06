@@ -37,3 +37,18 @@ test('event listing requires login and ownership before requesting the source', 
   await assert.rejects(handleApi(new Request('https://event-watch.example/api/lgs/store/events'),env),e=>e.status===401);
   db.exec("UPDATE sessions SET user_id='other'");await assert.rejects(handleApi(request(),env),e=>e.status===404);assert.equal(calls,0);db.close();
 });
+
+test('unwatched LGS event opens internal details without creating a watch', async t => {
+  const { db, env } = await fixture();
+  t.mock.method(globalThis, 'fetch', async () => new Response('<html><h1>Saved Event</h1><button>Log In to Join</button><p>Event registration is available. Welcome to this event.</p></html>'));
+  const request = new Request('https://event-watch.example/api/lgs/store/events/123', { headers: { cookie: 'eventwatch_session=token' } });
+  const data = await (await handleApi(request, env)).json();
+  assert.equal(data.event.is_watched, false);assert.equal(data.event.status, 'AVAILABLE');
+  assert.equal(data.event.event_url, 'https://locator.riftbound.uvsgames.com/events/123');
+  assert.equal(db.prepare('SELECT count(*) AS n FROM subscriptions').get().n, 0);db.close();
+});
+test('internal event details reject events outside the owned LGS listing', async t => {
+  const {db,env}=await fixture();
+  t.mock.method(globalThis,'fetch',async()=>new Response('<html><h1>Store</h1><p>No events listed at this store. Check back for upcoming event announcements later.</p></html>'));
+  await assert.rejects(handleApi(new Request('https://event-watch.example/api/lgs/store/events/999', {headers:{cookie:'eventwatch_session=token'}}), env), e=>e.status===404);db.close();
+});

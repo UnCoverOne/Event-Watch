@@ -11,7 +11,7 @@ import {
   verifyEmailToken,
 } from './auth.js';
 import { checkOneEvent, checkOneLgs, flushAlertQueue } from './checker.js';
-import { normalizeEventUrl, normalizeLgsUrl, fetchLgsStore } from './adapters.js';
+import { normalizeEventUrl, normalizeLgsUrl, fetchLgsStore, fetchEvent } from './adapters.js';
 import { normalizeCheckInterval, nextCheckAt } from './schedule.js';
 import { HttpError, json, nowIso, readJson, uuid } from './utils.js';
 
@@ -192,6 +192,38 @@ export async function handleApi(request, env) {
       ORDER BY sub.active DESC, sub.created_at DESC
     `).bind(user.id).all();
     return json({ stores: rows.results || [] });
+  }
+
+  const lgsEventMatch = url.pathname.match(/^\/api\/lgs\/([^/]+)\/events\/(\d+)$/);
+  if (method === 'GET' && lgsEventMatch) {
+    const user = await requireUser(request, env);
+    const store = await env.DB.prepare(`SELECT store.*, sub.id AS subscription_id
+      FROM lgs_stores store JOIN lgs_subscriptions sub ON sub.store_id = store.id
+      WHERE sub.user_id = ? AND store.id = ?`).bind(user.id, decodeURIComponent(lgsEventMatch[1])).first();
+    if (!store) throw new HttpError(404, 'This LGS watch could not be found.');
+    const key = lgsEventMatch[2];
+    let listed = await env.DB.prepare('SELECT title FROM lgs_subscription_events WHERE subscription_id = ? AND event_key = ?').bind(store.subscription_id, key).first();
+    if (!listed) {
+      const snapshot = await fetchLgsStore(store);
+      listed = snapshot.events.find(event => event.eventKey === key);
+    }
+    if (!listed) throw new HttpError(404, 'This event is not listed at this LGS.');
+    const watched = await env.DB.prepare(`SELECT e.*, e.id AS event_id, s.id AS subscription_id, s.active,
+      s.check_interval_minutes, s.next_check_at, s.created_at
+      FROM events e JOIN subscriptions s ON s.event_id = e.id
+      WHERE s.user_id = ? AND e.event_key = ?`).bind(user.id, `riftbound:${key}`).first();
+    if (watched) return json({ event: { ...watched, is_watched: true } });
+    const eventUrl = `https://locator.riftbound.uvsgames.com/events/${key}`;
+    const item = { event_key: `riftbound:${key}`, event_url: eventUrl, adapter: 'riftbound',
+      source_host: 'locator.riftbound.uvsgames.com', title: listed.title, host_lgs: store.title,
+      is_watched: false, status: 'UNKNOWN' };
+    try {
+      const parsed = await fetchEvent(item);
+      Object.assign(item, { title: parsed.title || item.title, status: parsed.status,
+        status_reason: parsed.reason, event_date: parsed.eventDate, host_lgs: parsed.hostLgs || store.title,
+        current_players: parsed.currentPlayers, capacity: parsed.capacity, last_checked_at: nowIso() });
+    } catch { item.last_error = 'Current event details could not be loaded. You can retry by reopening this event.'; }
+    return json({ event: item });
   }
 
   const lgsEventsMatch = url.pathname.match(/^\/api\/lgs\/([^/]+)\/events$/);

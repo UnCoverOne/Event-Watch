@@ -4,7 +4,7 @@ const INTERVALS = [
   [30, 'Every 30 minutes'], [60, 'Every hour'], [180, 'Every 3 hours'],
   [360, 'Every 6 hours'], [720, 'Every 12 hours'], [1440, 'Every day'],
 ];
-const BUILD_ID = '2026-10-06-riftbound-hydration';
+const BUILD_ID = '2026-10-06-lgs-internal-events';
 
 const params = new URL(location.href).searchParams;
 const kind = params.get('kind');
@@ -29,8 +29,9 @@ async function init() {
 
   try {
     if (kind === 'event') {
-      const data = await api('/api/events');
-      const item = (data.events || []).find((entry) => entry.event_id === id);
+      const storeId = params.get('store');
+      const data = await api(storeId ? `/api/lgs/${encodeURIComponent(storeId)}/events/${encodeURIComponent(id)}` : '/api/events');
+      const item = storeId ? data.event : (data.events || []).find((entry) => entry.event_id === id);
       if (!item) return renderMissing('This event watch could not be found.');
       renderEvent(item);
     } else {
@@ -48,7 +49,7 @@ async function init() {
 }
 
 function renderEvent(item) {
-  const archived = Number(item.active) !== 1;
+  const archived = item.is_watched !== false && Number(item.active) !== 1;
   const title = item.title || item.source_host || 'Watched event';
   const players = item.capacity != null && item.current_players != null
     ? `${item.current_players}/${item.capacity}`
@@ -60,7 +61,7 @@ function renderEvent(item) {
   view.classList.remove('hidden');
   view.innerHTML = `
     <div class="detail-hero">
-      <p class="eyebrow">${archived ? 'Archived event watch' : 'Event watch'}</p>
+      <p class="eyebrow">${item.is_watched === false ? 'LGS event' : archived ? 'Archived event watch' : 'Event watch'}</p>
       <div class="detail-hero-row">
         <h1 class="detail-title">${escapeText(title)}</h1>
         <a class="detail-source-link" href="${escapeAttribute(item.event_url)}" target="_blank" rel="noopener noreferrer">Open source ↗</a>
@@ -88,7 +89,7 @@ function renderEvent(item) {
       <aside class="panel detail-section">
         <h2>Controls</h2>
         <div class="detail-actions">
-          ${archived ? archivedControls('event') : activeControls('event', item.check_interval_minutes)}
+          ${item.is_watched === false ? '<p class="detail-copy">Watch this event to receive registration alerts.</p><button id="detailWatch" class="primary" type="button">Watch event</button>' : archived ? archivedControls('event') : activeControls('event', item.check_interval_minutes)}
         </div>
       </aside>
     </div>
@@ -107,7 +108,13 @@ function renderEvent(item) {
       </div>
     </section>`;
 
-  bindActions('event', item, archived);
+  if (item.is_watched === false) {
+    view.querySelector('.detail-technical')?.remove();
+    $('detailWatch').addEventListener('click', event => withBusy(event.currentTarget, async () => {
+      await api('/api/events', { method: 'POST', body: { url: item.event_url } });
+      await reloadDetail();
+    }));
+  } else { bindActions('event', item, archived); }
 }
 
 function renderLgs(item) {
@@ -387,9 +394,9 @@ async function loadLgsEvents(storeId) {
     const events = data.events || [];
     status.textContent = data.warning || (events.length ? `${events.length} ${events.length === 1 ? 'event' : 'events'} currently listed at this store.` : 'No events are currently listed at this store.');
     list.innerHTML = events.map(event => `
-      <a class="lgs-listed-event" href="${escapeAttribute(event.event_url)}" target="_blank" rel="noopener noreferrer">
+      <a class="lgs-listed-event" href="/detail.html?kind=event&amp;store=${encodeURIComponent(storeId)}&amp;id=${encodeURIComponent(event.event_key)}">
         <span><strong>${escapeText(event.title || `Riftbound event #${event.event_key}`)}</strong><small>Event #${escapeText(event.event_key)}</small></span>
-        <span class="lgs-event-open">Open event ↗</span>
+        <span class="lgs-event-open">View event →</span>
       </a>`).join('');
   } catch (error) {
     status.textContent = error.message || 'Unable to load store events. Please try again.';

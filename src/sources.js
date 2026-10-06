@@ -20,23 +20,22 @@ export async function sourceJson(url, options = {}) {
   return response.json();
 }
 export async function playQuery(operationName, variables) {
-  const data = await sourceJson("https://playriftbound.com/api/gql", {
-    method: "POST",
+  const extensions = {
+    persistedQuery: {
+      version: 1,
+      sha256Hash: PLAY_OPERATIONS[operationName],
+    },
+  };
+  const query = new URLSearchParams({
+    operationName,
+    variables: JSON.stringify(variables),
+    extensions: JSON.stringify(extensions),
+  });
+  const data = await sourceJson(`https://playriftbound.com/api/gql?${query}`, {
     headers: {
-      "Content-Type": "application/json",
       "apollographql-client-name": "Event Watch",
       "apollographql-client-version": "1.0",
     },
-    body: JSON.stringify({
-      operationName,
-      variables,
-      extensions: {
-        persistedQuery: {
-          version: 1,
-          sha256Hash: PLAY_OPERATIONS[operationName],
-        },
-      },
-    }),
   });
   if (data.errors?.length || !data.data)
     throw new Error(

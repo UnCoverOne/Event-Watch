@@ -358,7 +358,7 @@ async function loadSourceStatus() {
   try {
     const data = await api("/api/catalogue/sources");
     $("sourceStatus").innerHTML =
-      `<details><summary>Sources & freshness</summary>${data.sources
+      `${data.sources.some(s => !s.last_completed_at) ? "<div>Catalogue indexing is in progress. More events and stores will appear as sources are imported.</div>" : ""}<details><summary>Sources & freshness</summary>${data.sources
         .map((s) => {
           const label =
             s.source === "play"

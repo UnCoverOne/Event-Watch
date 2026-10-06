@@ -114,11 +114,17 @@ const raw = (id = 100) => ({
 
 test("additive migration preserves existing IDs, intervals and archive state", () => {
   const db = new DatabaseSync(":memory:");
-  apply(db, files.slice(0, -1));
+  apply(
+    db,
+    files.filter((f) => f < "0006"),
+  );
   db.exec(
     "INSERT INTO users VALUES ('u','u@x.test','hash',NULL,'2020','2020',1); INSERT INTO events (id,event_key,event_url,created_at,updated_at) VALUES ('e','key','https://example.com/e','2020','2020'); INSERT INTO subscriptions (id,user_id,event_id,active,check_interval_minutes,created_at,updated_at) VALUES ('s','u','e',0,60,'2020','2020');",
   );
-  apply(db, files.slice(-1));
+  apply(
+    db,
+    files.filter((f) => f >= "0006"),
+  );
   const s = db.prepare("SELECT * FROM subscriptions").get();
   assert.equal(s.id, "s");
   assert.equal(s.archived, 1);
@@ -461,4 +467,61 @@ test("store watchers baseline existing listings, notify only new events, and arc
   assert.equal(result.skipped, true);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM alert_queue").get().n, 0);
   db.close();
+});
+
+test("legacy display dates become sortable and past listings leave upcoming browse", async () => {
+  const db = new DatabaseSync(":memory:");
+  apply(
+    db,
+    files.filter((f) => f < "0007"),
+  );
+  db.prepare(
+    "INSERT INTO events (id,event_key,event_url,event_date,created_at,updated_at) VALUES (?,?,?,?,?,?)",
+  ).run(
+    "past",
+    "past",
+    "https://example.com/past",
+    "Oct 1, 2026",
+    "2026",
+    "2026",
+  );
+  db.prepare(
+    "INSERT INTO events (id,event_key,event_url,event_date,created_at,updated_at) VALUES (?,?,?,?,?,?)",
+  ).run(
+    "future",
+    "future",
+    "https://example.com/future",
+    "Oct 8, 2026",
+    "2026",
+    "2026",
+  );
+  apply(
+    db,
+    files.filter((f) => f >= "0007"),
+  );
+  assert.equal(
+    db.prepare("SELECT starts_at FROM events WHERE id='past'").get().starts_at,
+    "2026-10-01T00:00:00.000Z",
+  );
+  assert.deepEqual(
+    db
+      .prepare(
+        "SELECT id FROM events WHERE starts_at >= '2026-10-06' ORDER BY starts_at",
+      )
+      .all()
+      .map((r) => r.id),
+    ["future"],
+  );
+  db.close();
+});
+
+test("source requests use Workers-compatible manual redirects and reject redirects", async (t) => {
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    assert.equal(options.redirect, "manual");
+    return new Response("", {
+      status: 302,
+      headers: { location: "https://unexpected.example/" },
+    });
+  });
+  await assert.rejects(fetchSourcePage("uvs-events"), /HTTP 302/);
 });

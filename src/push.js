@@ -71,7 +71,7 @@ export async function sendPush(env, subscription, payload) {
   const authorization = await vapidAuthorization(config, subscription.endpoint, env.APP_ORIGIN);
   const body = await encryptPayload(subscription, payload);
   const response = await fetch(subscription.endpoint, {
-    method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15000),
+    method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(15000),
     headers: { Authorization: authorization, 'Content-Type': 'application/octet-stream', 'Content-Encoding': 'aes128gcm', TTL: '86400', Urgency: 'normal' }, body,
   });
   if ([404, 410].includes(response.status)) {

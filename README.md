@@ -41,7 +41,7 @@ Email alerts require email verification. Push requires browser permission and is
 
 ## Development
 
-Requires Node 22 or newer (tests use `node:sqlite`).
+Requires Node 22.22.2 or newer (tests use `node:sqlite`).
 
 ```sh
 npm ci
@@ -62,7 +62,7 @@ npm run db:migrate:remote
 npm run deploy
 ```
 
-Keep the existing D1 binding and `APP_ORIGIN` in `wrangler.jsonc`. Migration `0006_catalogue.sql` is additive and preserves existing primary keys, account credentials, sessions, refresh intervals and archived watches. Never replace the production database with a new empty one.
+Keep the existing D1 binding and `APP_ORIGIN` in `wrangler.jsonc`. Migrations `0006_catalogue.sql` and `0007_legacy_event_dates.sql` are additive and preserve existing primary keys, account credentials, sessions, refresh intervals and archived watches. Never replace the production database with a new empty one.
 
 Before a production migration, retain a D1 backup / Time Travel recovery point. To recover a failed release, redeploy the previous Worker version; if reverting database changes is necessary, restore the matching database recovery point. The old interface does not understand bookmark-only or joined records, so a rollback after users have begun using the new states requires care rather than continued use of the old dashboard.
 

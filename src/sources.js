@@ -13,7 +13,7 @@ export const PLAY_OPERATIONS = {
 export async function sourceJson(url, options = {}) {
   const response = await fetch(url, {
     ...options,
-    redirect: "error",
+    redirect: "manual",
     signal: AbortSignal.timeout(20000),
   });
   if (!response.ok) throw new Error(`Source returned HTTP ${response.status}`);

@@ -77,7 +77,7 @@ export async function fetchRiftboundStore(storeUrl) {
 
 async function fetchStoreJson(path) {
   const response = await fetch(`https://api.cloudflare.riftbound.uvsgames.com/hydraproxy${path}`, {
-    headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(15000), redirect: 'error',
+    headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(15000), redirect: 'manual',
   });
   if (!response.ok) throw new Error(`Riftbound listing returned HTTP ${response.status}`);
   return response.json();

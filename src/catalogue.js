@@ -199,6 +199,7 @@ export async function refreshCatalogueItem(env, kind, item) {
   const at = nowIso();
   // Public detail refreshes are shared and throttled, not per-visitor polling.
   if (
+    (item.source_id || item.adapter === "generic") &&
     item.last_checked_at &&
     Date.now() - Date.parse(item.last_checked_at) < 5 * 60_000
   )

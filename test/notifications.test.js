@@ -30,7 +30,7 @@ function mockTransport(t, pushStatus = () => 201) {
   t.mock.method(globalThis, 'fetch', async (url, options) => {
     if (String(url).includes('oauth2.googleapis.com')) return Response.json({ access_token: 'access' });
     if (String(url).includes('gmail.googleapis.com')) { calls.email++; return Response.json({ id: 'sent' }); }
-    assert.ok(String(url).startsWith('https://fcm.googleapis.com/')); calls.push++;
+    assert.ok(String(url).startsWith('https://fcm.googleapis.com/')); assert.equal(options.redirect, 'manual'); calls.push++;
     assert.equal(options.headers['Content-Encoding'], 'aes128gcm');
     return new Response('', { status: pushStatus(url) });
   });

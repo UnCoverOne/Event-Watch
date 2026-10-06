@@ -6,7 +6,7 @@ import {
   fetchEvent,
   fetchLgsStore,
 } from "./adapters.js";
-import { catalogueStoreEvents, refreshCatalogueItem } from "./catalogue.js";
+import { catalogueStoreEvents, refreshCatalogueItem, syncCatalogue } from "./catalogue.js";
 import { normalizeCheckInterval } from "./schedule.js";
 import { CONNECTORS, getPreferences, savePreferences, browseScope, scopeConditions } from './browse-preferences.js';
 
@@ -27,6 +27,21 @@ export async function handleCatalogueApi(request, env) {
       const user = await requireUser(request, env);
       return json({ preferences: await savePreferences(env, user, await readJson(request)) });
     }
+  }
+  if (method === "POST" && path === "/api/catalogue/refresh") {
+    const scope = await browseScope(env, await currentUser(request, env), url.searchParams);
+    if (!scope?.sources.length)
+      return json({ refreshed: [], setup_required: true });
+
+    const targets = [];
+    if (scope.sources.includes("uvs")) targets.push("uvs-events", "uvs-stores");
+    if (scope.sources.includes("play")) targets.push("play");
+
+    const refreshed = [];
+    for (const source of targets)
+      refreshed.push(await syncCatalogue(env, { source, force: true, enabled: scope.sources }));
+
+    return json({ refreshed });
   }
   if (method === "GET" && path === "/api/catalogue/sources") {
     const scope = await browseScope(env, await currentUser(request, env), url.searchParams);

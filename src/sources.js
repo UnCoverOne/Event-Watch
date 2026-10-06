@@ -4,9 +4,9 @@ export const UVS_API =
   "https://api.cloudflare.riftbound.uvsgames.com/hydraproxy/api/v2";
 export const PLAY_OPERATIONS = {
   CompeteTournamentSearch:
-    "acbcbba681a9c9a8063f792f7d665ba1eda81b19528b6af19e523f0c2061bec2",
+    "9e2e6f2d6f9d08baac662f04222dfce639a327d0c41d7fcacc2d13d535daf55a",
   GetCompeteTournamentForRiftboundPlayer:
-    "b1bbb48ce34fe781db8af6bc81d1d643ddbaac21d3347cd532ae6d1162f8c13e",
+    "aac86921988218b2462bf3d2c684937b8598579e9bb49d91e0491c56564e5c2c",
   OrganizerSummary:
     "9142e18241bb86a3b4c2692d899b31aaf61d11065ca8a259191aa9cc0a06ed57",
 };
@@ -259,7 +259,7 @@ export async function fetchSourcePage(source, cursor = null) {
   const store = source === "uvs-stores";
   const query = new URLSearchParams({
     game_slug: "riftbound",
-    page_size: "10",
+    page_size: "50",
     page: String(page),
     ...(store ? {} : { upcoming_only: "true" }),
   });

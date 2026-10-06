@@ -335,7 +335,7 @@ test("Refresh results forces selected catalogue sources before returning", async
   t.mock.method(globalThis, "fetch", async (url, options) => {
     calls++;
     const parsed = new URL(url);
-    assert.equal(parsed.origin + parsed.pathname, "https://playriftbound.com/api/gql");
+    assert.equal(parsed.origin + parsed.pathname, "https://lolesports.com/api/gql");
     assert.equal(options.method, undefined);
     assert.equal(parsed.searchParams.get("operationName"), "CompeteTournamentSearch");
     return Response.json({
@@ -387,12 +387,14 @@ test("Play Riftbound uses its public persisted operation and rejects GraphQL err
   let bad = false;
   t.mock.method(globalThis, "fetch", async (url, options) => {
     const parsed = new URL(url);
-    assert.equal(parsed.origin + parsed.pathname, "https://playriftbound.com/api/gql");
+    assert.equal(parsed.origin + parsed.pathname, "https://lolesports.com/api/gql");
     assert.equal(options.method, undefined);
     assert.equal(parsed.searchParams.get("operationName"), "CompeteTournamentSearch");
     const variables = JSON.parse(parsed.searchParams.get("variables"));
     const extensions = JSON.parse(parsed.searchParams.get("extensions"));
-    assert.deepEqual(variables.filter, { rb: {} });
+    assert.deepEqual(variables.filter, {});
+    assert.deepEqual(variables.sortBy, {});
+    assert.deepEqual(extensions.clientLibrary, { name: "@apollo/client", version: "4.1.2" });
     assert.equal(extensions.persistedQuery.sha256Hash, "9e2e6f2d6f9d08baac662f04222dfce639a327d0c41d7fcacc2d13d535daf55a");
     return Response.json(
       bad

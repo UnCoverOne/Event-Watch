@@ -1,7 +1,7 @@
 {
   "name": "Event Watch",
   "short_name": "Event Watch",
-  "description": "Watch event pages and local game store listings, then get alerted when availability changes.",
+  "description": "Browse events and stores, save favourites and get alerted when registration or places open.",
   "id": "/",
   "start_url": "/",
   "scope": "/",

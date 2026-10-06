@@ -1,3 +1,4 @@
+import { parsePlayEventUrl, fetchPlayEvent, sourceJson, UVS_API, uvsEvent } from './sources.js';
 import { parseRiftboundEventUrl, fetchRiftboundEvent } from './riftbound.js';
 import { parseRiftboundStoreUrl, fetchRiftboundStore } from './riftbound-store.js';
 import { fetchGenericEvent } from './generic.js';
@@ -16,6 +17,9 @@ export async function normalizeEventUrl(input) {
   if (isPrivateHostname(url.hostname)) throw new Error('Private or local network URLs are not supported.');
 
   url.hash = '';
+  let play;
+  try { play = parsePlayEventUrl(url.toString()); } catch {}
+  if (play) return { eventKey: `play:${play.eventKey}`, canonicalUrl: play.canonicalUrl, adapter: 'play', sourceHost: 'playriftbound.com' };
   const riftbound = tryParseRiftbound(url.toString());
   if (riftbound) {
     return {
@@ -59,6 +63,12 @@ export function normalizeLgsUrl(input) {
 }
 
 export async function fetchEvent(event) {
+  if (event.adapter === 'play') return fetchPlayEvent(event.event_url);
+  if (event.adapter === 'riftbound' && event.source_id) {
+    const data = await sourceJson(`${UVS_API}/events/${encodeURIComponent(event.source_id)}/`);
+    const r = uvsEvent(data.event || data);
+    return { title: r.title, eventDate: r.event_date, hostLgs: r.host_lgs, status: r.status, reason: r.status_reason, currentPlayers: r.current_players, capacity: r.capacity };
+  }
   if (event.adapter === 'riftbound') return fetchRiftboundEvent(event.event_url);
   return fetchGenericEvent(event.event_url);
 }

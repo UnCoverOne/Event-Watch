@@ -1,139 +1,79 @@
 # Event Watch
 
-A minimalist Cloudflare-native service that watches event pages and local game store listings, then emails users when registration becomes available or a watched LGS adds a new event.
+A Cloudflare-hosted event browsing and monitoring client. Browse events and stores without an account, then sign in to sync bookmarks, watches, joined events and archives across devices.
 
-Event Watch is **not tied to one event platform**. Users can paste any public HTTPS event page. The checker uses a site-adapter architecture:
+## Features
 
-- **Generic adapter** — conservative detection of common registration, booking, ticket, sold-out, closed, and not-yet-open states.
-- **Riftbound adapter** — a specialized detector for Riftbound/UVS locator pages, included as the first platform-specific adapter.
-- More adapters can be added later without changing accounts, subscriptions, notifications, or the dashboard.
+- One searchable catalogue for UVS / Riftbound Gaming Network and Play Riftbound.
+- Events and stores, source filters, country and location search, event dates, format, event type, availability and entry fee filters; paginated date, name, location and recently-added sorting.
+- Public detail pages and internal navigation from stores to their events.
+- Independent bookmarks and watches. Joining an event pauses its availability alerts. Archiving an item pauses its notifications while preserving its other settings.
+- Event watches for registration openings and places becoming available; store watches for newly discovered events.
+- Account email preferences and opt-in push notifications on each device.
+- Existing accounts, watched links and archives migrate in place. Other public HTTPS event links can still be added manually through the generic adapter.
+- Installable PWA, dark/light themes and responsive layouts.
 
-## Stack
+## Source adapters and freshness
 
-- Cloudflare Workers — API, authentication, scheduled checking, and static asset routing
-- Cloudflare D1 — users, sessions, events, subscriptions, and notification history
-- Cloudflare Cron Triggers — scheduler wakes every five minutes; each watch can use its own refresh interval
-- Gmail API — verification and availability emails sent from your Gmail account
-- GitHub Actions — tests and Cloudflare deployment
-- Vanilla HTML/CSS/JS — deliberately small frontend
+`src/sources.js` contains the two structured public integrations:
 
-## How monitoring works
+- UVS: paginated `/api/v2/events/` and `/api/v2/game-stores/` via the existing public Hydra proxy, with individual event/store refreshes.
+- Play Riftbound: the website's public persisted GraphQL operations for tournament search, tournament details and organizer summaries. The operation IDs were inspected on 2026-10-06. This is not an account-linking integration. Changes to upstream persisted operations require updating the IDs and adapter tests.
 
-1. A signed-in user pastes an HTTPS event-page URL.
-2. Event Watch canonicalizes the URL and selects an adapter.
-3. The event is stored once even when several users watch it.
-4. The Worker wakes every five minutes and checks only subscriptions whose selected refresh interval is due.
-5. Status is classified as `AVAILABLE`, `FULL`, `NOT_OPEN`, `CLOSED`, `UNAVAILABLE`, or `UNKNOWN`.
-6. Alerts are queued during the scheduler run and grouped by user. One digest email is sent after the refresh window, even if several watched items changed.\n7. LGS watches silently record the current listing as a baseline, then alert only for event IDs that appear later.
+Play Riftbound stores are discovered from event listings; the public integration does not provide a separate complete store directory. Search listings do not prove registration is open: individual event checks use registration policy, opening/closing times and capacity. Unknown information is shown as unknown.
 
-Each event or LGS watch can use a 5, 10, 15, or 30 minute interval, or 1, 3, 6, 12, or 24 hours. The dashboard defaults to dark mode and stores the user’s light/dark preference locally in the browser. Event Watch batches all alerts discovered in the same scheduler run into one email per user.\n\nFor unknown websites the detector intentionally favors avoiding false positives. A page must expose a clear action control such as **Register**, **Book now**, **Get tickets**, **Reserve a spot**, or **Sign up** before it is classified as available. Pages that render registration exclusively after client-side JavaScript, require authentication, block automated requests, or use unusual wording may need a dedicated adapter.
+`src/catalogue.js` imports a bounded page per background run and retains its cursor in D1. The initial catalogue fills progressively; **Sources & freshness** reports incomplete indexing or source errors. Searches run over the indexed catalogue. Source errors retain the previous records and cursor rather than pretending the source is empty. After completing a scan, the next scan becomes eligible after 30 minutes. Importing a large source takes multiple runs, so a full scan is not a guarantee of live freshness for every listing. Individually watched events and UVS stores are checked independently at the selected watch interval. Play store watches use the imported catalogue, so their discovery speed depends on indexing progress.
 
-## Security notes
+Exact source IDs/URLs are deduplicated. Listings from different sources are merged only when the normalized name and full address match (and, for events, the exact start time and host also match). Alternate source links remain available. Incomplete metadata can leave duplicates separate rather than merging unrelated events.
 
-- Only public HTTPS URLs are accepted.
-- Localhost and common private-network IPv4 ranges are rejected to reduce SSRF risk.
-- URL credentials are rejected.
-- Passwords are salted and hashed with PBKDF2-SHA256.
-- Session tokens are random, stored only as SHA-256 hashes, and delivered in `HttpOnly`, `Secure`, `SameSite=Lax` cookies.
-- Availability notifications are only sent to verified email addresses.
-- API mutations enforce same-origin requests.
-- Google OAuth client credentials and refresh token belong in Cloudflare secrets, never in Git.
+## Personal state and notifications
 
-## Local development
+The shared catalogue is separate from each user's subscriptions. `bookmarked`, `watching`, `joined` (events only) and `archived` are independent flags. The existing `active` flag represents notification eligibility:
 
-```bash
-npm install
-npx wrangler d1 migrations apply DB --local
+- Event: watching and not joined and not archived.
+- Store: watching and not archived.
+
+Bookmarks never enable monitoring. Restore keeps prior watch/joined settings. Archiving a store does not change individually watched events. A joined or archived event is also excluded from new-event alerts originating from a store watch.
+
+The scheduler wakes every minute. Every fifth minute is reserved for due watches and notification delivery; other minutes advance the catalogue. Supported watch intervals remain 5, 10, 15, 30, 60, 180, 360, 720 and 1440 minutes. Store watches silently establish an initial baseline and alert only on subsequent new IDs. Joined, unwatched and archived items discard pending direct alerts; delivery rechecks eligibility. Email digests and push deliveries retain separate retry records.
+
+Email alerts require email verification. Push requires browser permission and is enabled per device. Signing out disables that device's subscription. Marking Joined is manual and does not register the user on the source website.
+
+## Development
+
+Requires Node 22 or newer (tests use `node:sqlite`).
+
+```sh
+npm ci
+npm run db:migrate:local
 npm run dev
-```
-
-Run tests:
-
-```bash
 npm test
+npx wrangler deploy --dry-run
 ```
 
-## Cloudflare setup
+The app uses Workers, D1, Cron Triggers and plain HTML/CSS/JavaScript. There is no frontend build step. Tests cover migration preservation, source parsing and pagination, saved-state isolation, notification suppression, store baselines, account settings, push delivery and PWA assets.
 
-### 1. Create the D1 database
+## Deployment
 
-```bash
-npx wrangler d1 create event-watch
-```
+Pushes to `main` run `.github/workflows/deploy.yml`: install dependencies, run tests, apply D1 migrations, then deploy the Worker and assets. The existing GitHub secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are required. Manual `workflow_dispatch` is also supported.
 
-Copy the returned database ID into `wrangler.jsonc` in place of `REPLACE_WITH_D1_DATABASE_ID`.
-
-Apply the schema:
-
-```bash
-npx wrangler d1 migrations apply DB --remote
-```
-
-### 2. Configure email
-
-Create a Resend account and verify a sending domain. Then change `NOTIFICATION_FROM` in `wrangler.jsonc` to an address on that domain.
-
-Add the API key as a Worker secret:
-
-```bash
-npx wrangler secret put RESEND_API_KEY
-```
-
-### 3. Deploy
-
-```bash
+```sh
+npm run db:migrate:remote
 npm run deploy
 ```
 
-After the first deploy, set `APP_ORIGIN` in `wrangler.jsonc` to the real Worker/custom-domain origin and deploy again. This is used when generating email-verification links.
+Keep the existing D1 binding and `APP_ORIGIN` in `wrangler.jsonc`. Migration `0006_catalogue.sql` is additive and preserves existing primary keys, account credentials, sessions, refresh intervals and archived watches. Never replace the production database with a new empty one.
 
-### 4. GitHub Actions deployment
+Before a production migration, retain a D1 backup / Time Travel recovery point. To recover a failed release, redeploy the previous Worker version; if reverting database changes is necessary, restore the matching database recovery point. The old interface does not understand bookmark-only or joined records, so a rollback after users have begun using the new states requires care rather than continued use of the old dashboard.
 
-The repository includes `.github/workflows/deploy.yml`. Add these repository secrets:
+## Email and push setup
 
-- `CLOUDFLARE_API_TOKEN`
-- `CLOUDFLARE_ACCOUNT_ID`
+Email uses the Gmail API. Store `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `GOOGLE_REFRESH_TOKEN` as Worker secrets; `GMAIL_SENDER_EMAIL`, `GMAIL_FROM_NAME` and `APP_ORIGIN` are configured in Wrangler. `npm run gmail:authorize` supports obtaining a Gmail refresh token. Never commit credentials.
 
-The Cloudflare token needs enough permission to deploy Workers and manage the D1 database used by this app. The deployment workflow is currently manual. Run it from GitHub Actions after the Cloudflare secrets are configured.
+Web Push uses a server-generated VAPID identity in D1. Keep the existing `push_config` row and device subscriptions when migrating; replacing the signing identity invalidates existing subscriptions. No separate push-provider account is required.
 
-## Adding another site-specific adapter
+## Security and extension points
 
-Site logic belongs in `src/`. `src/adapters.js` chooses which detector to use. A new adapter should return the common shape:
+Passwords use salted PBKDF2-SHA256; session tokens are hashed in D1 and sent using HttpOnly, Secure, SameSite=Lax cookies. Saved-item mutations require authentication and same-origin requests. Personal state is joined to catalogue queries only for the authenticated user. Source text is escaped and registration remains on the original website.
 
-```js
-{
-  title: 'Example event',
-  status: 'AVAILABLE',
-  reason: 'A registration control is visible.',
-  currentPlayers: null,
-  capacity: null,
-}
-```
-
-Prefer structured public APIs or stable server-rendered markup when a platform provides them. Keep platform-specific parsing isolated and add tests for full, closed, not-open, and available states.
-
-## Current limitations
-
-Event Watch performs ordinary HTTP fetching from a Cloudflare Worker; it is not a headless browser. Sites whose availability state only appears after running JavaScript may return `UNAVAILABLE` or an error until a dedicated API/adapter is added. This is intentional: guessing availability would create noisy alerts.
-
-
-## LGS watch pages
-
-The **LGS pages** dashboard tab currently supports Riftbound Gaming Network store URLs such as:
-
-```
-https://locator.riftbound.uvsgames.com/stores/<store-uuid>
-```
-
-When a store is first added, Event Watch records the event IDs already present without notifying the user. On later checks, newly observed `/events/<id>` links are treated as new LGS events and queued for the next digest email.
-
-The database objects for this feature are created by `migrations/0003_lgs_watch_and_alert_queue.sql`. The same migration adds the generic alert queue used to batch event-availability and LGS-new-event notifications.
-
-
-### Notification settings
-
-Signed-in users can open **Settings** on the dashboard to enable or disable email alerts for their account and push alerts for the current browser/device independently. Email stays enabled by default and requires a verified address. Push is opt-in and asks for browser permission only when enabled; **Send test notification** checks delivery. Turning off push or signing out removes that browser subscription. Other subscribed devices remain enabled.
-
-The existing scheduler sends alerts for registration availability and new events on watched LGS pages. Push notifications open the matching Event Watch detail page. Email and each device have separate delivery records, so transient failures retry without repeating successful channel deliveries. Expired push subscriptions are removed automatically.
-
-Migration `0005_notifications.sql` adds notification preferences, device subscriptions, delivery records, and a server-side VAPID signing identity. The Worker generates and persists that identity in D1 on first use; the private key is never returned to clients or committed to source control. No additional provider account or deployment secret is required. Keep the D1 configuration row when migrating the database so existing device subscriptions continue to work.
+Add new integrations in `src/sources.js` / `src/adapters.js`, normalize into the existing catalogue fields and add source-specific tests. Generic HTTPS pages use conservative HTML detection; client-only or authenticated pages may remain unknown and need a dedicated supported adapter.

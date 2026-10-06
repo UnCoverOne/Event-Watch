@@ -1,49 +1,345 @@
 <!doctype html>
 <html lang="en" data-theme="dark">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <meta name="theme-color" content="#0c0d0f" />
-  <meta name="description" content="Event Watch entry details." />
-  <meta name="robots" content="noindex" />
-  <title>Details | Event Watch</title>
-  <script>
-    (() => {
-      const theme = localStorage.getItem('event-watch-theme') || 'dark';
-      document.documentElement.dataset.theme = theme;
-      document.querySelector('meta[name="theme-color"]')
-        ?.setAttribute('content', theme === 'dark' ? '#0c0d0f' : '#f4f4f1');
-    })();
-  </script>
-  <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png?v=2" />
-  <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
-  <link rel="stylesheet" href="/styles.css" />
-</head>
-<body>
-  <div class="detail-shell">
-    <header class="topbar">
-      <a class="brand" href="/" aria-label="Event Watch home">Event Watch<span class="dot">.</span></a>
-      <div class="top-actions">
-        <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch theme">
-          <span class="theme-icon" aria-hidden="true">☀</span>
-          <span id="themeLabel">Light</span>
-        </button>
-        <button id="logoutButton" class="link-button" type="button">Sign out</button>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#0c0d0f" />
+    <meta
+      name="description"
+      content="Find your next event. Browse Riftbound events and stores, save your favourites and watch for openings."
+    />
+    <meta name="application-name" content="Event Watch" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
+    <meta name="apple-mobile-web-app-title" content="Event Watch" />
+    <title>Event Watch — Find your next event</title>
+    <script>
+      try {
+        document.documentElement.dataset.theme =
+          localStorage.getItem("event-watch-theme") || "dark";
+      } catch {}
+    </script>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="192x192"
+      href="/icons/icon-192.png?v=2"
+    />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png?v=2" />
+    <link rel="stylesheet" href="/styles.css?v=1.0" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">Skip to content</a>
+    <div class="shell">
+      <header class="topbar">
+        <a class="brand" href="/">Event Watch<span class="dot">.</span></a>
+        <div class="top-actions">
+          <button
+            id="themeToggle"
+            class="link-button"
+            type="button"
+            aria-label="Switch colour theme"
+          >
+            Light mode
+          </button>
+          <button id="settingsButton" class="link-button hidden" type="button">
+            Settings
+          </button>
+          <button id="signInButton" class="small-button" type="button">
+            Sign in
+          </button>
+          <button id="logoutButton" class="link-button hidden" type="button">
+            Sign out
+          </button>
+        </div>
+      </header>
+      <div class="workspace">
+        <aside class="sidebar">
+          <p class="eyebrow">Discover & keep track</p>
+          <nav id="navigation" aria-label="Main navigation">
+            <a href="/?view=browse" data-view="browse"
+              ><span aria-hidden="true">◎</span> Browse</a
+            >
+            <a href="/?view=bookmarks" data-view="bookmarks"
+              ><span aria-hidden="true">☆</span> Bookmarks</a
+            >
+            <a href="/?view=watching" data-view="watching"
+              ><span aria-hidden="true">◉</span> Watching</a
+            >
+            <a href="/?view=joined" data-view="joined"
+              ><span aria-hidden="true">✓</span> Joined</a
+            >
+            <a href="/?view=archive" data-view="archive"
+              ><span aria-hidden="true">▤</span> Archive</a
+            >
+          </nav>
+          <div class="sidebar-bottom">
+            <p id="accountLine" class="muted">
+              Browse freely. Sign in to save and sync.
+            </p>
+            <button id="addLinkButton" class="small-button" type="button">
+              ＋ Add a link
+            </button>
+          </div>
+        </aside>
+        <main id="content" tabindex="-1">
+          <div id="verificationBox" class="notice hidden">
+            <span>Verify your email to receive email alerts.</span
+            ><button id="resendVerification" class="link-button">
+              Send verification
+            </button>
+          </div>
+          <div id="appError" class="notice error hidden" role="alert"></div>
+          <section id="browseView">
+            <div class="page-heading">
+              <div>
+                <p class="eyebrow" id="pageEyebrow">
+                  One place. More possibilities.
+                </p>
+                <h1 id="pageTitle">Find your next event.</h1>
+                <p id="pageDescription" class="lede">
+                  Explore events and stores across the Riftbound community.
+                </p>
+              </div>
+              <span class="game-pill">Riftbound</span>
+            </div>
+            <div class="browse-toolbar">
+              <div class="tabs" id="kindTabs" aria-label="Browse type">
+                <button
+                  data-kind="event"
+                  class="tab active"
+                  aria-pressed="true"
+                >
+                  Events</button
+                ><button data-kind="store" class="tab" aria-pressed="false">
+                  Stores
+                </button>
+              </div>
+              <button id="reloadButton" class="link-button">
+                Refresh results
+              </button>
+            </div>
+            <form id="searchForm" class="search-panel panel">
+              <div class="search-row">
+                <label class="search-label"
+                  ><span class="sr-only"
+                    >Search by event, store or location</span
+                  ><input
+                    id="searchInput"
+                    name="q"
+                    type="search"
+                    placeholder="Search by event, store or location…"
+                    maxlength="200" /></label
+                ><button class="primary" type="submit">Search</button
+                ><button
+                  id="filterToggle"
+                  class="small-button"
+                  type="button"
+                  aria-expanded="false"
+                  aria-controls="filters"
+                >
+                  Filters
+                </button>
+              </div>
+              <div id="filters" class="filters hidden">
+                <label
+                  >Source<select id="sourceFilter" name="source">
+                    <option value="">All sources</option>
+                    <option value="uvs">UVS Gaming Network</option>
+                    <option value="play">Play Riftbound</option>
+                    <option value="other">Other links</option>
+                  </select></label
+                >
+                <label
+                  >Country<select id="countryFilter" name="country">
+                    <option value="">All countries</option>
+                  </select></label
+                >
+                <label class="event-filter"
+                  >Format<select id="formatFilter" name="format">
+                    <option value="">All formats</option>
+                  </select></label
+                >
+                <label class="event-filter"
+                  >Event type<select id="categoryFilter" name="category">
+                    <option value="">All types</option>
+                  </select></label
+                >
+                <label class="event-filter"
+                  >Availability<select id="statusFilter" name="status">
+                    <option value="">Any availability</option>
+                    <option value="AVAILABLE">Available</option>
+                    <option value="NOT_OPEN">Not open yet</option>
+                    <option value="FULL">Full</option>
+                    <option value="CLOSED">Closed</option>
+                    <option value="UNKNOWN">Unknown</option>
+                  </select></label
+                >
+                <label class="event-filter"
+                  >Entry fee<select id="priceFilter" name="price">
+                    <option value="">Any price</option>
+                    <option value="free">Free</option>
+                    <option value="paid">Paid</option>
+                  </select></label
+                >
+                <label class="event-filter"
+                  >From<input id="fromFilter" name="from" type="date" /></label
+                ><label class="event-filter"
+                  >Through<input id="toFilter" name="to" type="date"
+                /></label>
+                <label class="event-filter"
+                  >Time<select id="whenFilter" name="when">
+                    <option value="upcoming">Upcoming</option>
+                    <option value="all">Include past events</option>
+                  </select></label
+                >
+                <button id="resetFilters" class="link-button" type="button">
+                  Reset filters
+                </button>
+              </div>
+            </form>
+            <div
+              id="sourceStatus"
+              class="source-status"
+              aria-live="polite"
+            ></div>
+            <div class="result-toolbar">
+              <p id="resultCount" role="status">Loading events…</p>
+              <label class="sort-label"
+                >Sort<select id="sortSelect">
+                  <option value="date">Soonest first</option>
+                  <option value="latest">Latest first</option>
+                  <option value="name">Name A–Z</option>
+                  <option value="newest">Recently added</option>
+                  <option value="location">Location</option>
+                </select></label
+              >
+            </div>
+            <div id="results" class="results" aria-busy="true"></div>
+            <div id="emptyState" class="empty panel hidden">
+              <h2 id="emptyTitle">No events found</h2>
+              <p id="emptyCopy">
+                Try a different search or adjust your filters.
+              </p>
+              <button id="emptyAction" class="small-button" type="button">
+                Clear filters
+              </button>
+            </div>
+            <nav id="pagination" class="pagination" aria-label="Result pages">
+              <button id="previousPage" class="small-button">← Previous</button
+              ><span id="pageNumber"></span
+              ><button id="nextPage" class="small-button">Next →</button>
+            </nav>
+          </section>
+          <section id="detailView" class="hidden" aria-live="polite"></section>
+        </main>
       </div>
-    </header>
-
-    <main class="detail-main">
-      <a class="detail-back" href="/">← Back to watches</a>
-      <div id="detailLoading" class="detail-loading">Loading details…</div>
-      <section id="detailView" class="hidden" aria-live="polite"></section>
-    </main>
-
-    <footer>
-      <span>Event Watch</span>
-      <span>Detailed watch information and controls.</span>
-    </footer>
-  </div>
-  <script type="module" src="/detail.js"></script>
-</body>
+      <footer>
+        <span>Discover. Save. Be there.</span
+        ><span
+          >Availability can change. Registration is completed on the original
+          website.</span
+        >
+      </footer>
+    </div>
+    <dialog id="authDialog">
+      <div class="settings-heading">
+        <h2>Make it yours.</h2>
+        <button
+          class="link-button"
+          data-close="authDialog"
+          aria-label="Close sign in"
+        >
+          Close
+        </button>
+      </div>
+      <p class="muted">
+        Save events and stores, get alerts and sync across your devices.
+      </p>
+      <div class="tabs">
+        <button id="loginTab" class="tab active">Sign in</button
+        ><button id="registerTab" class="tab">Create account</button>
+      </div>
+      <form id="authForm" class="stack">
+        <label
+          >Email<input
+            id="emailInput"
+            type="email"
+            autocomplete="email"
+            required /></label
+        ><label
+          >Password<input
+            id="passwordInput"
+            type="password"
+            autocomplete="current-password"
+            required
+            minlength="12"
+            maxlength="200"
+        /></label>
+        <p class="hint">Use a password of at least 12 characters.</p>
+        <button id="authSubmit" class="primary">Sign in</button>
+        <p id="authError" class="error" role="alert"></p>
+      </form>
+    </dialog>
+    <dialog id="addDialog">
+      <div class="settings-heading">
+        <h2>Add a link</h2>
+        <button class="link-button" data-close="addDialog">Close</button>
+      </div>
+      <p class="muted">
+        Open an event or UVS store directly, then choose how to save it.
+      </p>
+      <form id="addForm" class="stack">
+        <label
+          >Item type<select id="addKind">
+            <option value="event">Event</option>
+            <option value="store">Store</option>
+          </select></label
+        ><label
+          >Page URL<input
+            id="addUrl"
+            type="url"
+            required
+            placeholder="https://…" /></label
+        ><button class="primary" type="submit">Open item</button>
+        <p id="addError" class="error" role="alert"></p>
+      </form>
+    </dialog>
+    <dialog id="notificationSettings">
+      <div class="settings-heading">
+        <h2>Notifications</h2>
+        <button id="closeSettings" class="link-button" type="button">
+          Close
+        </button>
+      </div>
+      <p class="muted">Choose how to receive your watch alerts.</p>
+      <label class="notification-option"
+        ><span
+          ><strong>Email notifications</strong
+          ><small
+            >Account preference. Email verification is required.</small
+          ></span
+        ><input id="emailNotifications" type="checkbox"
+      /></label>
+      <label class="notification-option"
+        ><span
+          ><strong>Push notifications</strong
+          ><small
+            >On this device. Your browser will ask for permission.</small
+          ></span
+        ><input id="pushNotifications" type="checkbox"
+      /></label>
+      <button id="testPush" class="small-button" disabled>
+        Send test notification
+      </button>
+      <p id="notificationStatus" class="hint" role="status"></p>
+    </dialog>
+    <div id="toast" class="toast hidden" role="status"></div>
+    <script type="module" src="/app.js?v=1.0"></script>
+  </body>
 </html>

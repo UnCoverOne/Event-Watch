@@ -1,3 +1,4 @@
+import { catalogueStoreEvents } from './catalogue.js';
 import { sendPush, alertNotification } from './push.js';
 import { fetchEvent, fetchLgsStore } from './adapters.js';
 import { nowIso, uuid } from './utils.js';
@@ -104,10 +105,11 @@ export async function checkOneEvent(env, event, options = {}) {
 
     let alertsQueued = 0;
     for (const subscription of targets) {
-      if (parsed.status === 'AVAILABLE' && subscription.last_seen_status !== 'AVAILABLE') {
+      if (shouldNotifyAvailability(subscription, parsed.status)) {
         const inserted = await enqueueAlert(env, {
           userId: subscription.user_id,
           kind: 'event_available',
+          subscriptionId: subscription.id,
           itemKey: `${subscription.id}:${event.id}:${checkedAt}`,
           title: parsed.title || event.title || 'Watched event',
           itemUrl: event.event_url,
@@ -123,7 +125,7 @@ export async function checkOneEvent(env, event, options = {}) {
         SET last_seen_status = ?, next_check_at = ?, updated_at = ?
         WHERE id = ?
       `).bind(
-        parsed.status,
+        parsed.status === 'UNKNOWN' ? subscription.last_seen_status : parsed.status,
         nextCheckAt(checkedAt, subscription.check_interval_minutes),
         checkedAt,
         subscription.id
@@ -176,7 +178,15 @@ export async function checkOneLgs(env, store, options = {}) {
   }
 
   try {
-    const snapshot = await fetchLgsStore(store);
+    let snapshot;
+    if (store.source === 'play' || store.source_id) {
+      if (store.source === 'play') {
+        const sync = await env.DB.prepare("SELECT last_completed_at FROM catalogue_sync WHERE source = 'play'").first();
+        if (!sync?.last_completed_at) throw new Error('The initial Play Riftbound catalogue import is still running.');
+      }
+      const events = await catalogueStoreEvents(env, store, { refresh: store.source === 'uvs' });
+      snapshot = { title: store.title, events: events.map(e => ({ eventKey: store.source === 'uvs' ? e.event_key.replace(/^riftbound:/, '') : e.event_key, eventUrl: e.event_url, title: e.title })) };
+    } else snapshot = await fetchLgsStore(store);
     const storeTitle = snapshot.title || store.title || 'Watched LGS';
 
     await env.DB.prepare(`
@@ -218,6 +228,7 @@ export async function checkOneLgs(env, store, options = {}) {
           const inserted = await enqueueAlert(env, {
             userId: subscription.user_id,
             kind: 'lgs_new_event',
+            storeSubscriptionId: subscription.id,
             itemKey: `${subscription.id}:${event.eventKey}`,
             title: event.title || `Riftbound event #${event.eventKey}`,
             itemUrl: event.eventUrl,
@@ -296,6 +307,12 @@ export async function flushAlertQueue(env, options = {}) {
       // Refresh inside the lease: another flush may have completed these rows.
       group.alerts = (await env.DB.prepare('SELECT * FROM alert_queue WHERE user_id = ? AND sent_at IS NULL ORDER BY created_at LIMIT 100').bind(group.user_id).all()).results || [];
 
+      const eligible = [];
+      for (const alert of group.alerts) {
+        if (await alertIsEligible(env, alert)) eligible.push(alert);
+        else await env.DB.prepare('DELETE FROM alert_queue WHERE id = ?').bind(alert.id).run();
+      }
+      group.alerts = eligible;
       const emailPending = group.alerts.filter(a => !a.email_sent_at);
       let emailComplete = !group.email_notifications || !emailPending.length;
       if (!emailComplete && group.email_verified_at) {
@@ -352,11 +369,30 @@ export function groupAlertsByUser(rows) {
   return [...groups.values()];
 }
 
+export function shouldNotifyAvailability(subscription, status) {
+  if (status !== 'AVAILABLE' || subscription.last_seen_status === 'AVAILABLE') return false;
+  return subscription.last_seen_status === 'FULL' ? subscription.notify_slots !== 0 : subscription.notify_open !== 0;
+}
+
+export async function alertIsEligible(env, alert) {
+  const row = await env.DB.prepare(`SELECT
+    (? IS NULL OR EXISTS (SELECT 1 FROM subscriptions WHERE id = ? AND user_id = ? AND active = 1))
+    AND (? IS NULL OR EXISTS (SELECT 1 FROM lgs_subscriptions WHERE id = ? AND user_id = ? AND active = 1))
+    AND NOT EXISTS (SELECT 1 FROM subscriptions s JOIN events e ON e.id = s.event_id
+      WHERE s.user_id = ? AND (s.joined = 1 OR s.archived = 1)
+      AND (e.event_url = ? OR EXISTS (SELECT 1 FROM catalogue_sources cs WHERE cs.kind = 'event' AND cs.entity_id = e.id AND cs.url = ?))) AS eligible`)
+    .bind(alert.subscription_id ?? null, alert.subscription_id ?? null, alert.user_id,
+      alert.store_subscription_id ?? null, alert.store_subscription_id ?? null, alert.user_id,
+      alert.user_id, alert.item_url, alert.item_url).first();
+  return Boolean(row?.eligible);
+}
+
 async function enqueueAlert(env, alert) {
+  if (!await alertIsEligible(env, { subscription_id: alert.subscriptionId, store_subscription_id: alert.storeSubscriptionId, user_id: alert.userId, item_url: alert.itemUrl })) return false;
   const result = await env.DB.prepare(`
     INSERT OR IGNORE INTO alert_queue
-      (id, user_id, kind, item_key, title, item_url, message, created_at, detail_url)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (id, user_id, kind, item_key, title, item_url, message, created_at, detail_url, subscription_id, store_subscription_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     uuid(),
     alert.userId,
@@ -366,7 +402,9 @@ async function enqueueAlert(env, alert) {
     alert.itemUrl,
     alert.message || null,
     alert.createdAt || nowIso(),
-    alert.detailUrl || null
+    alert.detailUrl || null,
+    alert.subscriptionId || null,
+    alert.storeSubscriptionId || null
   ).run();
 
   return Number(result.meta?.changes || 0) > 0;
@@ -376,7 +414,7 @@ async function getTargetSubscriptions(env, eventId, checkedAt, options) {
   const base = `
     SELECT
       s.id, s.user_id, s.check_interval_minutes,
-      s.last_seen_status, s.next_check_at
+      s.last_seen_status, s.next_check_at, s.notify_open, s.notify_slots
     FROM subscriptions s
     WHERE s.event_id = ? AND s.active = 1
   `;

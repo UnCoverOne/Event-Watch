@@ -1,3 +1,4 @@
+import { handleCatalogueApi } from './catalogue-api.js';
 import { handleNotifications } from './notifications.js';
 import {
   assertSameOrigin,
@@ -31,6 +32,8 @@ export async function handleApi(request, env) {
   }
 
   if (['POST', 'DELETE', 'PATCH'].includes(method)) assertSameOrigin(request);
+
+  if (url.pathname.startsWith('/api/catalogue/')) return handleCatalogueApi(request, env);
 
   if (url.pathname === '/api/settings/notifications' || url.pathname.startsWith('/api/push/')) {
     return handleNotifications(request, env);
@@ -123,6 +126,7 @@ export async function handleApi(request, env) {
       event = await env.DB.prepare('SELECT * FROM events WHERE id = ?').bind(eventId).first();
     }
 
+    await env.DB.prepare('UPDATE events SET source = ? WHERE id = ?').bind(parsed.adapter === 'play' ? 'play' : parsed.adapter === 'riftbound' ? 'uvs' : 'other', event.id).run();
     const existing = await env.DB.prepare(
       'SELECT id, active FROM subscriptions WHERE user_id = ? AND event_id = ?'
     ).bind(user.id, event.id).first();
@@ -132,7 +136,7 @@ export async function handleApi(request, env) {
       subscriptionId = existing.id;
       await env.DB.prepare(`
         UPDATE subscriptions
-        SET active = 1,
+        SET active = 1, watching = 1, archived = 0,
             check_interval_minutes = ?,
             last_seen_status = 'UNKNOWN',
             next_check_at = NULL,
@@ -297,7 +301,7 @@ export async function handleApi(request, env) {
       subscriptionId = existing.id;
       await env.DB.prepare(`
         UPDATE lgs_subscriptions
-        SET active = 1,
+        SET active = 1, watching = 1, archived = 0,
             check_interval_minutes = ?,
             next_check_at = NULL,
             initialized_at = NULL,
@@ -346,7 +350,7 @@ export async function handleApi(request, env) {
   if (method === 'DELETE' && eventMatch) {
     const user = await requireUser(request, env);
     await env.DB.prepare(`
-      UPDATE subscriptions SET active = 0, updated_at = ?
+      UPDATE subscriptions SET active = 0, archived = 1, updated_at = ?
       WHERE user_id = ? AND event_id = ?
     `).bind(nowIso(), user.id, eventMatch[1]).run();
     return json({ ok: true });
@@ -378,7 +382,7 @@ export async function handleApi(request, env) {
     const at = nowIso();
     const result = await env.DB.prepare(`
       UPDATE subscriptions
-      SET active = 1, next_check_at = NULL, updated_at = ?
+      SET active = 1, watching = 1, archived = 0, next_check_at = NULL, updated_at = ?
       WHERE user_id = ? AND event_id = ? AND active = 0
     `).bind(at, user.id, eventRestoreMatch[1]).run();
 
@@ -439,7 +443,7 @@ export async function handleApi(request, env) {
   if (method === 'DELETE' && lgsMatch) {
     const user = await requireUser(request, env);
     await env.DB.prepare(`
-      UPDATE lgs_subscriptions SET active = 0, updated_at = ?
+      UPDATE lgs_subscriptions SET active = 0, archived = 1, updated_at = ?
       WHERE user_id = ? AND store_id = ?
     `).bind(nowIso(), user.id, lgsMatch[1]).run();
     return json({ ok: true });
@@ -471,7 +475,7 @@ export async function handleApi(request, env) {
     const at = nowIso();
     const result = await env.DB.prepare(`
       UPDATE lgs_subscriptions
-      SET active = 1, next_check_at = NULL, updated_at = ?
+      SET active = 1, watching = 1, archived = 0, next_check_at = NULL, updated_at = ?
       WHERE user_id = ? AND store_id = ? AND active = 0
     `).bind(at, user.id, lgsRestoreMatch[1]).run();
 

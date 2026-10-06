@@ -34,8 +34,8 @@ export async function handleCatalogueApi(request, env) {
       return json({ refreshed: [], setup_required: true });
 
     const targets = [];
-    if (scope.sources.includes("uvs")) targets.push(["uvs-events", 3], ["uvs-stores", 3]);
-    if (scope.sources.includes("play")) targets.push(["play", 30]);
+    if (scope.sources.includes("uvs")) targets.push(["uvs-events", 4], ["uvs-stores", 4]);
+    if (scope.sources.includes("play")) targets.push(["play", 20]);
 
     const refreshed = [];
     for (const [source, maxPages] of targets) {

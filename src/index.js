@@ -8,6 +8,10 @@ export default {
     const url = new URL(request.url);
     try {
       if (url.pathname.startsWith("/api/")) {
+        // Keep initial indexing moving when scheduled triggers are delayed.
+        // The shared lease and refresh interval bound work across all visitors.
+        if (request.method === "GET" && url.pathname === "/api/catalogue/sources")
+          ctx.waitUntil(syncCatalogue(env).catch((error) => console.error("Background catalogue sync failed", error)));
         return await handleApi(request, env);
       }
       return env.ASSETS.fetch(request);

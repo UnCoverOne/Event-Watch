@@ -34,7 +34,9 @@ export async function handleCatalogueApi(request, env) {
       return json({ refreshed: [], setup_required: true });
 
     const targets = [];
-    if (scope.sources.includes("uvs")) targets.push(["uvs-events", 4], ["uvs-stores", 4]);
+    // Manual refresh is intentionally much more aggressive than the minute cron:
+    // users expect this button to materially advance an incomplete catalogue.
+    if (scope.sources.includes("uvs")) targets.push(["uvs-events", 10], ["uvs-stores", 10]);
     if (scope.sources.includes("play")) targets.push(["play", 20]);
 
     const refreshed = [];

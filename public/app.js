@@ -105,15 +105,24 @@ $("filterToggle").addEventListener("click", () => {
   $("filters").classList.toggle("hidden", !expanded);
 });
 $("resetFilters").addEventListener("click", resetFilters);
-$("reloadButton").addEventListener("click", () => {
-  state.resultCache.clear();
-  state.metadataCache.clear();
-  loadResults();
-  if (state.view === "browse" && state.preferences?.sources.length) {
-    loadSourceStatus();
-    loadFilterOptions();
-  }
-});
+$("reloadButton").addEventListener("click", () =>
+  runAction(async () => {
+    const button = $("reloadButton");
+    button.disabled = true;
+    try {
+      if (state.view === "browse" && state.preferences?.sources.length)
+        await api(`/api/catalogue/refresh?${scopeParams()}`, { method: "POST" });
+      state.resultCache.clear();
+      state.metadataCache.clear();
+      await loadResults();
+      if (state.view === "browse" && state.preferences?.sources.length)
+        await Promise.all([loadSourceStatus(), loadFilterOptions()]);
+      toast("Results refreshed.");
+    } finally {
+      button.disabled = false;
+    }
+  }),
+);
 $("previousPage").addEventListener("click", () => changePage(-1));
 $("nextPage").addEventListener("click", () => changePage(1));
 $("emptyAction").addEventListener("click", () => {

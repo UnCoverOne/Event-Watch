@@ -392,7 +392,7 @@ test("Play Riftbound uses its public persisted operation and rejects GraphQL err
     assert.equal(parsed.searchParams.get("operationName"), "CompeteTournamentSearch");
     const variables = JSON.parse(parsed.searchParams.get("variables"));
     const extensions = JSON.parse(parsed.searchParams.get("extensions"));
-    assert.deepEqual(variables.filter, {});
+    assert.deepEqual(variables.filter, { rb: {} });
     assert.deepEqual(variables.sortBy, {});
     assert.deepEqual(extensions.clientLibrary, { name: "@apollo/client", version: "4.1.2" });
     assert.equal(extensions.persistedQuery.sha256Hash, "9e2e6f2d6f9d08baac662f04222dfce639a327d0c41d7fcacc2d13d535daf55a");

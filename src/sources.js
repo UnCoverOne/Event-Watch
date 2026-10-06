@@ -232,9 +232,10 @@ export async function fetchSourcePage(source, cursor = null) {
   if (source === "play") {
     const data = await playQuery("CompeteTournamentSearch", {
       sport: "rb",
-      filter: {
-        rb: { coords: { latitude: 0, longitude: 0 }, distanceMeters: 40075000 },
-      },
+      // Catalogue indexing must not invent a geographic origin. Play Riftbound
+      // accepts an empty filter for the global tournament listing; user country
+      // and city preferences are applied locally after records are indexed.
+      filter: {},
       first: 10,
       ...(cursor ? { after: cursor } : {}),
     });

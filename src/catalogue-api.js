@@ -6,7 +6,8 @@ import {
   fetchEvent,
   fetchLgsStore,
 } from "./adapters.js";
-import { catalogueStoreEvents, refreshCatalogueItem, syncCatalogue } from "./catalogue.js";
+import { catalogueStoreEvents, refreshCatalogueItem, saveRecord, syncCatalogue } from "./catalogue.js";
+import { playEvent, playQuery } from "./sources.js";
 import { normalizeCheckInterval } from "./schedule.js";
 import { CONNECTORS, getPreferences, savePreferences, browseScope, scopeConditions } from './browse-preferences.js';
 
@@ -14,6 +15,91 @@ const KINDS = {
   event: ["events", "subscriptions", "event_id"],
   store: ["lgs_stores", "lgs_subscriptions", "store_id"],
 };
+
+function countryNames(code) {
+  if (code === "*") return [];
+  const names = [code];
+  try {
+    const name = new Intl.DisplayNames(["en"], { type: "region" }).of(code);
+    if (name && name !== code) names.push(name);
+  } catch {}
+  if (code === "GB") names.push("UK", "United Kingdom");
+  if (code === "US") names.push("USA", "United States", "United States of America");
+  return [...new Set(names)];
+}
+
+async function regionalAnchor(env, scope, request) {
+  if (scope.country === "*") return null;
+  const countries = countryNames(scope.country);
+  const countryMarks = countries.map(() => "?").join(",");
+  const city = scope.city ? \`%\${scope.city.replace(/[\\%_]/g, "\\const KINDS = {
+  event: ["events", "subscriptions", "event_id"],
+  store: ["lgs_stores", "lgs_subscriptions", "store_id"],
+};")}%\` : null;
+  const citySql = city ? " AND city LIKE ? ESCAPE '\\\\'" : "";
+  const params = city ? [...countries, city, ...countries, city] : [...countries, ...countries];
+  const row = await env.DB.prepare(
+    \`SELECT AVG(latitude) AS latitude, AVG(longitude) AS longitude FROM (
+      SELECT latitude, longitude FROM events
+      WHERE country IN (\${countryMarks}) AND latitude IS NOT NULL AND longitude IS NOT NULL\${citySql}
+      UNION ALL
+      SELECT latitude, longitude FROM lgs_stores
+      WHERE country IN (\${countryMarks}) AND latitude IS NOT NULL AND longitude IS NOT NULL\${citySql}
+    )\`,
+  ).bind(...params).first();
+  if (Number.isFinite(Number(row?.latitude)) && Number.isFinite(Number(row?.longitude)))
+    return { latitude: Number(row.latitude), longitude: Number(row.longitude) };
+
+  const cf = request.cf || {};
+  if (
+    String(cf.country || "").toUpperCase() === scope.country &&
+    Number.isFinite(Number(cf.latitude)) &&
+    Number.isFinite(Number(cf.longitude))
+  )
+    return { latitude: Number(cf.latitude), longitude: Number(cf.longitude) };
+  return null;
+}
+
+async function refreshPlayRegion(env, scope, request) {
+  const anchor = await regionalAnchor(env, scope, request);
+  if (!anchor) return null;
+
+  const distanceMeters = scope.city ? 250000 : 5000000;
+  let after = null;
+  let imported = 0;
+  let pages = 0;
+  const at = nowIso();
+
+  while (pages < 20) {
+    const data = await playQuery("CompeteTournamentSearch", {
+      sport: "rb",
+      filter: { rb: { coords: anchor, distanceMeters } },
+      sortBy: {},
+      first: 25,
+      ...(after ? { after } : {}),
+    });
+    const listing = data.competeTournamentSearch;
+    if (!Array.isArray(listing?.edges) || !listing.pageInfo)
+      throw new Error("Invalid Play Riftbound listing.");
+
+    for (const edge of listing.edges) {
+      const record = playEvent(edge.node?.tournament, edge.node?.organizer);
+      await saveRecord(env, "event", record, at);
+      imported++;
+    }
+
+    pages++;
+    if (!listing.pageInfo.hasNextPage) break;
+    const next = listing.pageInfo.endCursor;
+    if (!next || next === after) throw new Error("Invalid Play Riftbound pagination.");
+    after = next;
+  }
+
+  await env.DB.prepare(
+    "UPDATE catalogue_sync SET last_checked_at = ?, last_error = NULL WHERE source = 'play'",
+  ).bind(at).run();
+  return { source: "play", count: imported, pages, regional: true };
+}
 export async function handleCatalogueApi(request, env) {
   const url = new URL(request.url),
     path = url.pathname,
@@ -33,18 +119,35 @@ export async function handleCatalogueApi(request, env) {
     if (!scope?.sources.length)
       return json({ refreshed: [], setup_required: true });
 
-    const targets = [];
-    // Manual refresh is intentionally much more aggressive than the minute cron:
-    // users expect this button to materially advance an incomplete catalogue.
-    if (scope.sources.includes("uvs")) targets.push(["uvs-events", 10], ["uvs-stores", 10]);
-    if (scope.sources.includes("play")) targets.push(["play", 20]);
-
     const refreshed = [];
-    for (const [source, maxPages] of targets) {
-      for (let page = 0; page < maxPages; page++) {
-        const result = await syncCatalogue(env, { source, force: true, enabled: scope.sources });
-        refreshed.push(result);
-        if (result.error || result.skipped || result.next == null) break;
+
+    if (scope.sources.includes("uvs")) {
+      for (const source of ["uvs-events", "uvs-stores"]) {
+        for (let page = 0; page < 15; page++) {
+          const result = await syncCatalogue(env, { source, force: true, enabled: scope.sources });
+          refreshed.push(result);
+          if (result.error || result.skipped || result.next == null) break;
+        }
+      }
+    }
+
+    if (scope.sources.includes("play")) {
+      try {
+        const regional = await refreshPlayRegion(env, scope, request);
+        if (regional) refreshed.push(regional);
+        else {
+          for (let page = 0; page < 15; page++) {
+            const result = await syncCatalogue(env, { source: "play", force: true, enabled: scope.sources });
+            refreshed.push(result);
+            if (result.error || result.skipped || result.next == null) break;
+          }
+        }
+      } catch (error) {
+        const at = nowIso();
+        await env.DB.prepare(
+          "UPDATE catalogue_sync SET last_error = ?, last_checked_at = ? WHERE source = 'play'",
+        ).bind(String(error.message).slice(0, 400), at).run();
+        refreshed.push({ source: "play", error: error.message });
       }
     }
 

@@ -517,7 +517,12 @@ async function loadSourceStatus() {
               : s.source === "uvs-events"
                 ? "UVS events"
                 : "UVS stores";
-          return `<div>${esc(label)} · ${s.last_error ? "Update unavailable; showing saved data" : s.last_completed_at ? `Updated ${esc(dateTime(s.last_checked_at))}` : "Initial indexing in progress; results are not yet complete"}</div>`;
+          const status = s.last_error
+            ? `Update unavailable: ${esc(s.last_error)} · showing saved data`
+            : s.last_completed_at
+              ? `Updated ${esc(dateTime(s.last_checked_at))}`
+              : "Initial indexing in progress; results are not yet complete";
+          return `<div>${esc(label)} · ${status}</div>`;
         })
         .join(
           "",

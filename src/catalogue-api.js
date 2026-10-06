@@ -6,7 +6,14 @@ import {
   fetchEvent,
   fetchLgsStore,
 } from "./adapters.js";
-import { catalogueStoreEvents, refreshCatalogueItem, saveRecord, syncCatalogue } from "./catalogue.js";
+import {
+  catalogueStoreEvents,
+  mergeCatalogueStores,
+  refreshCatalogueItem,
+  sameStoreIdentity,
+  saveRecord,
+  syncCatalogue,
+} from "./catalogue.js";
 import { playEvent, playQuery } from "./sources.js";
 import { normalizeCheckInterval } from "./schedule.js";
 import { CONNECTORS, getPreferences, savePreferences, browseScope, scopeConditions } from './browse-preferences.js';
@@ -40,6 +47,170 @@ function cityMatches(actual, wanted) {
         .replace(/\p{M}/gu, "")
         .toLowerCase(),
     );
+}
+
+const placeKey = (value) =>
+  String(value || "")
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+
+function pointDistanceKm(a, b) {
+  const toRad = (n) => (Number(n) * Math.PI) / 180;
+  const lat1 = toRad(a.latitude);
+  const lat2 = toRad(b.latitude);
+  const dLat = lat2 - lat1;
+  const dLon = toRad(b.longitude) - toRad(a.longitude);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return 6371 * 2 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+async function knownScopeLocations(env, scope) {
+  if (scope.country === "*") return { cities: new Map(), points: [] };
+
+  const countries = countryNames(scope.country);
+  const marks = countries.map(() => "?").join(",");
+  const rows =
+    (
+      await env.DB.prepare(
+        `SELECT city, latitude, longitude FROM events
+         WHERE country IN (${marks})
+         UNION ALL
+         SELECT city, latitude, longitude FROM lgs_stores
+         WHERE country IN (${marks})`,
+      )
+        .bind(...countries, ...countries)
+        .all()
+    ).results || [];
+
+  const cities = new Map();
+  const points = [];
+  for (const row of rows) {
+    const key = placeKey(row.city);
+    if (key && !cities.has(key)) cities.set(key, row.city);
+    if (
+      Number.isFinite(Number(row.latitude)) &&
+      Number.isFinite(Number(row.longitude))
+    )
+      points.push({
+        city: row.city || null,
+        latitude: Number(row.latitude),
+        longitude: Number(row.longitude),
+      });
+  }
+  return { cities, points };
+}
+
+function inferPlayScope(record, scope, known) {
+  if (scope.country === "*" || record.country) return record;
+
+  let matchedCity = null;
+  const city = placeKey(record.city);
+  if (city && known.cities.has(city)) matchedCity = known.cities.get(city);
+
+  if (
+    !matchedCity &&
+    Number.isFinite(Number(record.latitude)) &&
+    Number.isFinite(Number(record.longitude))
+  ) {
+    let nearest = null;
+    for (const point of known.points) {
+      const distance = pointDistanceKm(record, point);
+      if (!nearest || distance < nearest.distance)
+        nearest = { ...point, distance };
+    }
+    if (nearest && nearest.distance <= 25)
+      matchedCity = record.city || nearest.city || null;
+  }
+
+  if (!matchedCity && !city) return record;
+  if (!matchedCity && city && !known.cities.has(city)) return record;
+
+  const inferredCity = record.city || matchedCity || null;
+  return {
+    ...record,
+    city: inferredCity,
+    country: scope.country,
+    store: record.store
+      ? {
+          ...record.store,
+          city: record.store.city || inferredCity,
+          country: scope.country,
+        }
+      : record.store,
+  };
+}
+
+function storeQuality(store) {
+  return (
+    Number(Boolean(store.address)) * 4 +
+    Number(Boolean(store.city)) * 2 +
+    Number(
+      Number.isFinite(Number(store.latitude)) &&
+        Number.isFinite(Number(store.longitude)),
+    ) * 2 +
+    Number(Boolean(store.country))
+  );
+}
+
+async function reconcileStoreDuplicates(env, scope) {
+  if (scope.country === "*") return { merged: 0 };
+
+  const countries = countryNames(scope.country);
+  const marks = countries.map(() => "?").join(",");
+  const stores =
+    (
+      await env.DB.prepare(
+        `SELECT e.*,
+          (SELECT COUNT(*) FROM lgs_subscriptions s WHERE s.store_id = e.id) AS saved_count,
+          (SELECT COUNT(*) FROM catalogue_sources cs WHERE cs.kind = 'store' AND cs.entity_id = e.id) AS source_count
+         FROM lgs_stores e
+         WHERE e.country IN (${marks})
+         ORDER BY e.title COLLATE NOCASE, e.id
+         LIMIT 500`,
+      )
+        .bind(...countries)
+        .all()
+    ).results || [];
+
+  let merged = 0;
+  const removed = new Set();
+
+  for (let i = 0; i < stores.length; i++) {
+    if (removed.has(stores[i].id)) continue;
+    for (let j = i + 1; j < stores.length; j++) {
+      if (removed.has(stores[j].id)) continue;
+      if (!sameStoreIdentity(stores[i], stores[j])) continue;
+
+      const a = stores[i];
+      const b = stores[j];
+      const scoreA =
+        Number(a.saved_count || 0) * 100 +
+        Number(a.source_count || 0) * 20 +
+        storeQuality(a);
+      const scoreB =
+        Number(b.saved_count || 0) * 100 +
+        Number(b.source_count || 0) * 20 +
+        storeQuality(b);
+      const keep = scoreA >= scoreB ? a : b;
+      const drop = keep.id === a.id ? b : a;
+
+      await mergeCatalogueStores(env, keep.id, drop.id);
+      removed.add(drop.id);
+      merged++;
+
+      if (drop.id === stores[i].id) {
+        stores[i] = keep;
+        break;
+      }
+    }
+  }
+
+  return { merged };
 }
 
 async function regionalAnchor(env, scope, request) {
@@ -110,6 +281,8 @@ async function refreshPlayRegion(env, scope, request) {
   let pages = 0;
   let complete = false;
   const at = nowIso();
+  const knownLocations = await knownScopeLocations(env, scope);
+  let inferred = 0;
 
   while (pages < 20) {
     const data = await playQuery("CompeteTournamentSearch", {
@@ -130,12 +303,12 @@ async function refreshPlayRegion(env, scope, request) {
       if (!tournament || !organizer) continue;
 
       scanned++;
-      const record = playEvent(tournament, organizer);
-      if (
-        scope.country !== "*" &&
-        record.country !== scope.country
-      )
-        continue;
+      let record = playEvent(tournament, organizer);
+      const originalCountry = record.country;
+      record = inferPlayScope(record, scope, knownLocations);
+      if (!originalCountry && record.country) inferred++;
+
+      if (scope.country !== "*" && record.country !== scope.country) continue;
       if (!cityMatches(record.city, scope.city)) continue;
 
       await saveRecord(env, "event", record, at);
@@ -168,6 +341,7 @@ async function refreshPlayRegion(env, scope, request) {
     source: "play",
     count: imported,
     scanned,
+    inferred,
     pages,
     complete,
     regional: true,
@@ -307,6 +481,17 @@ export async function handleCatalogueApi(request, env) {
           console.error("Could not store Play source error", statusError.message);
         }
         refreshed.push({ source: "play", error: error.message });
+      }
+    }
+
+    if (scope.sources.includes("uvs") && scope.sources.includes("play")) {
+      try {
+        const stores = await reconcileStoreDuplicates(env, scope);
+        if (stores.merged)
+          refreshed.push({ source: "store-identity", merged: stores.merged });
+      } catch (error) {
+        console.error("Store reconciliation failed", error.message);
+        refreshed.push({ source: "store-identity", error: error.message });
       }
     }
 

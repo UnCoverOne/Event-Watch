@@ -7,6 +7,8 @@ import {
   saveRecord,
   syncCatalogue,
   catalogueStoreEvents,
+  mergeCatalogueStores,
+  sameStoreIdentity,
 } from "../src/catalogue.js";
 import {
   uvsEvent,
@@ -353,6 +355,148 @@ test("Refresh results forces selected catalogue sources before returning", async
   assert.equal(result.refreshed[0].source, "play");
   assert.equal(calls, 1);
   assert.ok(db.prepare("SELECT last_checked_at FROM catalogue_sync WHERE source = 'play'").get().last_checked_at);
+  db.close();
+});
+
+test("Play regional refresh keeps organizers whose city proves the selected country", async (t) => {
+  const { env, db, request } = await fixture();
+  db.prepare("UPDATE user_browse_preferences SET config = ? WHERE user_id = 'u'")
+    .run(JSON.stringify({ sources: ["play"], country: "RO", city: "" }));
+
+  await saveRecord(env, "store", uvsStore({
+    id: "uvs-bucharest",
+    name: "Known Bucharest Store",
+    city: "București",
+    country: "RO",
+    full_address: "Strada Exemplu 1, București, Romania",
+    latitude: 44.4268,
+    longitude: 26.1025,
+  }));
+
+  t.mock.method(globalThis, "fetch", async () =>
+    Response.json({
+      data: {
+        competeTournamentSearch: {
+          edges: [{
+            node: {
+              tournament: {
+                id: "ramcards-event",
+                name: "Radiance Pre-Rift Event | RamCards",
+                startsAt: "2099-10-16T16:00:00Z",
+                registrantCounts: [],
+                config: {},
+              },
+              organizer: {
+                id: "ramcards",
+                name: "RamCards",
+                physicalAddress: {
+                  formattedAddress: "Strada RamCards 1, București",
+                  city: "București",
+                  latitude: 44.44,
+                  longitude: 26.10,
+                },
+              },
+            },
+          }],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      },
+    }),
+  );
+
+  const result = await request("/api/catalogue/refresh", "POST");
+  const play = result.refreshed.find((row) => row.source === "play");
+  assert.equal(play.count, 1);
+  assert.equal(play.inferred, 1);
+  assert.equal(
+    db.prepare("SELECT country FROM events WHERE source_id='ramcards-event'").get().country,
+    "RO",
+  );
+  assert.equal(
+    db.prepare("SELECT country FROM lgs_stores WHERE source_id='ramcards'").get().country,
+    "RO",
+  );
+  db.close();
+});
+
+test("same cross-source store is reused and existing duplicates can merge safely", async () => {
+  const { env, db } = await fixture();
+
+  const uvs = {
+    source: "uvs",
+    source_id: "atu-uvs",
+    key: "uvs-store:atu-uvs",
+    url: "https://locator.riftbound.uvsgames.com/",
+    adapter: "riftbound-store",
+    title: "Atu Toys",
+    city: "Sibiu",
+    country: "Romania",
+    address: null,
+    latitude: null,
+    longitude: null,
+  };
+  const play = {
+    source: "play",
+    source_id: "atu-play",
+    key: "play:atu-play",
+    url: "https://playriftbound.com/en-US/events/",
+    adapter: "play-store",
+    title: "Atu Toys",
+    city: "Sibiu",
+    country: "RO",
+    address: "Strada Exemplu 2, Sibiu, Romania",
+    latitude: null,
+    longitude: null,
+  };
+
+  assert.equal(sameStoreIdentity(uvs, play), true);
+  const first = await saveRecord(env, "store", uvs);
+  const second = await saveRecord(env, "store", play);
+  assert.equal(second, first);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM lgs_stores").get().n, 1);
+  assert.equal(
+    db.prepare("SELECT COUNT(*) n FROM catalogue_sources WHERE kind='store' AND entity_id=?").get(first).n,
+    2,
+  );
+
+  // Simulate two rows that were created before cross-source identity matching.
+  db.prepare(
+    `INSERT INTO lgs_stores
+      (id,store_key,store_url,adapter,source_host,title,source,source_id,city,country,created_at,updated_at)
+     VALUES
+      ('checkpoint-uvs-row','uvs-store:checkpoint-old','https://locator.riftbound.uvsgames.com/','riftbound-store','locator.riftbound.uvsgames.com','Checkpoint','uvs','checkpoint-uvs',NULL,'Romania','2020','2020'),
+      ('checkpoint-play-row','play:checkpoint-old','https://playriftbound.com/en-US/events/','play-store','playriftbound.com','Checkpoint','play','checkpoint-play','Cluj-Napoca','RO','2020','2020')`,
+  ).run();
+  db.prepare(
+    `INSERT INTO catalogue_sources (kind,source,source_key,entity_id,url) VALUES
+      ('store','uvs','uvs-store:checkpoint-old','checkpoint-uvs-row','https://locator.riftbound.uvsgames.com/'),
+      ('store','play','play:checkpoint-old','checkpoint-play-row','https://playriftbound.com/en-US/events/')`,
+  ).run();
+  db.prepare(
+    "INSERT INTO events (id,event_key,event_url,store_id,created_at,updated_at) VALUES ('event-on-drop','event-on-drop','https://example.test/event','checkpoint-play-row','2020','2020')",
+  ).run();
+  db.prepare(
+    "INSERT INTO lgs_subscriptions (id,user_id,store_id,active,check_interval_minutes,created_at,updated_at) VALUES ('store-watch','u','checkpoint-play-row',1,60,'2020','2020')",
+  ).run();
+
+  const oldUvs = db.prepare("SELECT * FROM lgs_stores WHERE id='checkpoint-uvs-row'").get();
+  const oldPlay = db.prepare("SELECT * FROM lgs_stores WHERE id='checkpoint-play-row'").get();
+  assert.equal(sameStoreIdentity(oldUvs, oldPlay), true);
+
+  await mergeCatalogueStores(env, "checkpoint-uvs-row", "checkpoint-play-row");
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM lgs_stores WHERE title='Checkpoint'").get().n, 1);
+  assert.equal(
+    db.prepare("SELECT COUNT(*) n FROM catalogue_sources WHERE kind='store' AND entity_id='checkpoint-uvs-row'").get().n,
+    2,
+  );
+  assert.equal(
+    db.prepare("SELECT store_id FROM events WHERE id='event-on-drop'").get().store_id,
+    "checkpoint-uvs-row",
+  );
+  assert.equal(
+    db.prepare("SELECT store_id FROM lgs_subscriptions WHERE id='store-watch'").get().store_id,
+    "checkpoint-uvs-row",
+  );
   db.close();
 });
 

@@ -7,6 +7,7 @@ import {
   playQuery,
   playStore,
   fetchPlayEvent,
+  countryCodeFromFormattedAddress,
 } from "./sources.js";
 import { nowIso, uuid } from "./utils.js";
 
@@ -16,6 +17,76 @@ const textKey = (value) =>
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
+
+const countryKey = (value) => {
+  if (!value) return "";
+  return countryCodeFromFormattedAddress(String(value)) || textKey(value);
+};
+
+const hasCoords = (item) =>
+  Number.isFinite(Number(item?.latitude)) &&
+  Number.isFinite(Number(item?.longitude));
+
+function distanceKm(a, b) {
+  const toRad = (n) => (Number(n) * Math.PI) / 180;
+  const lat1 = toRad(a.latitude);
+  const lat2 = toRad(b.latitude);
+  const dLat = lat2 - lat1;
+  const dLon = toRad(b.longitude) - toRad(a.longitude);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return 6371 * 2 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+export function sameStoreIdentity(a, b) {
+  if (!a?.title || !b?.title || textKey(a.title) !== textKey(b.title))
+    return false;
+
+  const countryA = countryKey(a.country);
+  const countryB = countryKey(b.country);
+  if (countryA && countryB && countryA !== countryB) return false;
+
+  const cityA = textKey(a.city);
+  const cityB = textKey(b.city);
+  const addressA = textKey(a.address);
+  const addressB = textKey(b.address);
+  const sparseA = !cityA && !addressA;
+  const sparseB = !cityB && !addressB;
+
+  if (hasCoords(a) && hasCoords(b)) {
+    const distance = distanceKm(a, b);
+    if (distance <= 3) return true;
+    if (
+      distance <= 12 &&
+      ((cityA && cityB && cityA === cityB) || sparseA || sparseB)
+    )
+      return true;
+    return false;
+  }
+
+
+  if (
+    addressA &&
+    addressB &&
+    (addressA === addressB ||
+      (addressA.length >= 10 && addressB.includes(addressA)) ||
+      (addressB.length >= 10 && addressA.includes(addressB)))
+  )
+    return true;
+
+  if (cityA && cityB) return cityA === cityB;
+
+  // Some directory records expose only a store name + country. If the other
+  // source has richer location data, exact name + country is enough to attach
+  // the sparse listing as an alternate source.
+  return Boolean(
+    countryA &&
+      countryB &&
+      countryA === countryB &&
+      (sparseA || sparseB),
+  );
+}
 export function fingerprint(kind, item) {
   // Deliberately conservative: never merge merely similar names or nearby venues.
   if (!item.address || !item.title) return null;
@@ -44,6 +115,19 @@ export async function saveRecord(env, kind, item, at = nowIso()) {
     )
       .bind(fp)
       .first();
+  if (!existing && kind === "store" && item.title) {
+    const candidates =
+      (
+        await env.DB.prepare(
+          "SELECT * FROM lgs_stores WHERE LOWER(title) = LOWER(?) LIMIT 20",
+        )
+          .bind(item.title)
+          .all()
+      ).results || [];
+    existing = candidates.find((candidate) =>
+      sameStoreIdentity(candidate, item),
+    ) || null;
+  }
   const id = existing?.id || uuid();
   let storeId = existing?.store_id || null;
   if (kind === "event" && item.store)
@@ -130,6 +214,163 @@ export async function saveRecord(env, kind, item, at = nowIso()) {
     .bind(kind, item.source, item.key, id, item.url)
     .run();
   return id;
+}
+
+export async function mergeCatalogueStores(
+  env,
+  keepId,
+  dropId,
+  at = nowIso(),
+) {
+  if (!keepId || !dropId || keepId === dropId) return keepId;
+
+  const keep = await env.DB.prepare("SELECT * FROM lgs_stores WHERE id = ?")
+    .bind(keepId)
+    .first();
+  const drop = await env.DB.prepare("SELECT * FROM lgs_stores WHERE id = ?")
+    .bind(dropId)
+    .first();
+  if (!keep || !drop) return keep?.id || drop?.id || null;
+  if (!sameStoreIdentity(keep, drop))
+    throw new Error("Refusing to merge stores with different identities.");
+
+  await env.DB.prepare(
+    `UPDATE lgs_stores SET
+      title = COALESCE(title, ?),
+      city = COALESCE(city, ?),
+      country = COALESCE(country, ?),
+      address = COALESCE(address, ?),
+      latitude = COALESCE(latitude, ?),
+      longitude = COALESCE(longitude, ?),
+      fingerprint = COALESCE(fingerprint, ?),
+      updated_at = ?
+    WHERE id = ?`,
+  )
+    .bind(
+      drop.title,
+      drop.city,
+      drop.country,
+      drop.address,
+      drop.latitude,
+      drop.longitude,
+      drop.fingerprint,
+      at,
+      keepId,
+    )
+    .run();
+
+  await env.DB.prepare(
+    "UPDATE events SET store_id = ? WHERE store_id = ?",
+  )
+    .bind(keepId, dropId)
+    .run();
+
+  await env.DB.prepare(
+    "UPDATE catalogue_sources SET entity_id = ? WHERE kind = 'store' AND entity_id = ?",
+  )
+    .bind(keepId, dropId)
+    .run();
+
+  const dropSubscriptions =
+    (
+      await env.DB.prepare(
+        "SELECT * FROM lgs_subscriptions WHERE store_id = ?",
+      )
+        .bind(dropId)
+        .all()
+    ).results || [];
+
+  for (const dropSub of dropSubscriptions) {
+    const keepSub = await env.DB.prepare(
+      "SELECT * FROM lgs_subscriptions WHERE user_id = ? AND store_id = ?",
+    )
+      .bind(dropSub.user_id, keepId)
+      .first();
+
+    if (!keepSub) {
+      await env.DB.prepare(
+        "UPDATE lgs_subscriptions SET store_id = ?, updated_at = ? WHERE id = ?",
+      )
+        .bind(keepId, at, dropSub.id)
+        .run();
+      continue;
+    }
+
+    const seen =
+      (
+        await env.DB.prepare(
+          "SELECT * FROM lgs_subscription_events WHERE subscription_id = ?",
+        )
+          .bind(dropSub.id)
+          .all()
+      ).results || [];
+    for (const row of seen) {
+      await env.DB.prepare(
+        `INSERT OR IGNORE INTO lgs_subscription_events
+          (subscription_id, event_key, event_url, title, first_seen_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+        .bind(
+          keepSub.id,
+          row.event_key,
+          row.event_url,
+          row.title,
+          row.first_seen_at,
+        )
+        .run();
+    }
+
+    await env.DB.prepare(
+      `UPDATE alert_queue
+       SET store_subscription_id = ?,
+           detail_url = CASE
+             WHEN detail_url IS NULL THEN NULL
+             ELSE REPLACE(detail_url, ?, ?)
+           END
+       WHERE store_subscription_id = ?`,
+    )
+      .bind(keepSub.id, dropId, keepId, dropSub.id)
+      .run();
+
+    const nextCheck = [keepSub.next_check_at, dropSub.next_check_at]
+      .filter(Boolean)
+      .sort()[0] || null;
+    await env.DB.prepare(
+      `UPDATE lgs_subscriptions SET
+        bookmarked = ?,
+        watching = ?,
+        archived = ?,
+        check_interval_minutes = ?,
+        next_check_at = ?,
+        initialized_at = COALESCE(initialized_at, ?),
+        updated_at = ?
+       WHERE id = ?`,
+    )
+      .bind(
+        Math.max(Number(keepSub.bookmarked || 0), Number(dropSub.bookmarked || 0)),
+        Math.max(Number(keepSub.watching || 0), Number(dropSub.watching || 0)),
+        Math.min(Number(keepSub.archived || 0), Number(dropSub.archived || 0)),
+        Math.min(
+          Number(keepSub.check_interval_minutes || 60),
+          Number(dropSub.check_interval_minutes || 60),
+        ),
+        nextCheck,
+        dropSub.initialized_at,
+        at,
+        keepSub.id,
+      )
+      .run();
+
+    await env.DB.prepare("DELETE FROM lgs_subscriptions WHERE id = ?")
+      .bind(dropSub.id)
+      .run();
+  }
+
+  await env.DB.prepare("DELETE FROM lgs_stores WHERE id = ?")
+    .bind(dropId)
+    .run();
+
+  return keepId;
 }
 
 export async function syncCatalogue(

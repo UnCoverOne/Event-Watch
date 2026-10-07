@@ -502,6 +502,11 @@ function applyFilters() {
   url.search = "";
   url.searchParams.set("view", state.view);
   url.searchParams.set("kind", state.kind);
+  if (state.view === "collection")
+    url.searchParams.set(
+      "collection",
+      collectionFilters().join(","),
+    );
   const data = new FormData($("searchForm"));
   for (const [key, value] of data)
     if (

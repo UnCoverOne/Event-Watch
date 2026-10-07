@@ -711,7 +711,7 @@ export async function handleCatalogueApi(request, env) {
     const p = url.searchParams,
       view = p.get("view") || "browse";
     if (
-      !["browse", "bookmarks", "watching", "joined", "archive"].includes(view)
+      !["browse", "collection", "bookmarks", "watching", "joined", "archive"].includes(view)
     )
       throw new HttpError(400, "Unknown section.");
     if (view !== "browse" && !user)
@@ -727,7 +727,48 @@ export async function handleCatalogueApi(request, env) {
       where.push(...constraints.where);
       args.push(...constraints.args);
     }
-    if (view === "archive") where.push("s.archived = 1");
+    if (view === "collection") {
+      const allowedCollection = new Set([
+        "watching",
+        "bookmarked",
+        "joined",
+        "archived",
+      ]);
+      const rawCollection =
+        p.get("collection") ?? "watching,bookmarked,joined";
+      const selectedCollection = [
+        ...new Set(
+          rawCollection
+            .split(",")
+            .map((value) => value.trim())
+            .filter(Boolean),
+        ),
+      ];
+      if (selectedCollection.some((value) => !allowedCollection.has(value)))
+        throw new HttpError(400, "Unknown collection filter.");
+
+      const visible = [];
+      if (selectedCollection.includes("watching"))
+        visible.push("s.watching = 1");
+      if (selectedCollection.includes("bookmarked"))
+        visible.push("s.bookmarked = 1");
+      if (kind === "event" && selectedCollection.includes("joined"))
+        visible.push("s.joined = 1");
+
+      const collectionGroups = [];
+      if (visible.length)
+        collectionGroups.push(
+          `(s.archived = 0 AND (${visible.join(" OR ")}))`,
+        );
+      if (selectedCollection.includes("archived"))
+        collectionGroups.push("s.archived = 1");
+
+      where.push(
+        collectionGroups.length
+          ? `(${collectionGroups.join(" OR ")})`
+          : "0 = 1",
+      );
+    } else if (view === "archive") where.push("s.archived = 1");
     else {
       if (view !== "browse") where.push("s.archived = 0");
       if (view === "bookmarks") where.push("s.bookmarked = 1");
@@ -776,7 +817,11 @@ export async function handleCatalogueApi(request, env) {
           where.push(`e.starts_at ${operator} ?`);
           args.push(date.toISOString());
         }
-      if (!p.get("from") && p.get("when") !== "all" && view === "browse") {
+      if (
+        !p.get("from") &&
+        p.get("when") !== "all" &&
+        (view === "browse" || view === "collection")
+      ) {
         where.push("(e.starts_at IS NULL OR e.starts_at >= ?)");
         args.push(nowIso());
       }

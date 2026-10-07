@@ -310,6 +310,31 @@ main {
   color: var(--text);
   box-shadow: 0 2px 5px var(--shadow);
 }
+.collection-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0 4px;
+}
+.filter-chip {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 650;
+}
+.filter-chip:hover {
+  border-color: var(--muted);
+  color: var(--text);
+}
+.filter-chip.active {
+  background: var(--surface-2);
+  border-color: var(--accent-ink);
+  color: var(--accent-ink);
+}
+
 .panel {
   border: 1px solid var(--line);
   background: var(--surface);

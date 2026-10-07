@@ -14,7 +14,7 @@ import {
   saveRecord,
   syncCatalogue,
 } from "./catalogue.js";
-import { playEvent, playQuery } from "./sources.js";
+import { fetchPlayStoreEvents, playEvent, playQuery } from "./sources.js";
 import { normalizeCheckInterval } from "./schedule.js";
 import { CONNECTORS, getPreferences, savePreferences, browseScope, scopeConditions } from './browse-preferences.js';
 
@@ -799,6 +799,17 @@ export async function handleCatalogueApi(request, env) {
   if (method === "GET" && kind === "store" && action === "events") {
     let warning = null;
     try {
+      if (item.source === "play") {
+        const snapshot = await fetchPlayStoreEvents(item);
+        return json({
+          events: snapshot.events.map((e) => ({
+            title: e.title,
+            event_url: e.eventUrl,
+            event_key: e.eventKey,
+          })),
+          warning: null,
+        });
+      }
       if (item.source === "uvs" && item.source_id)
         await catalogueStoreEvents(env, item, { refresh: true });
       else if (item.adapter === "riftbound-store") {

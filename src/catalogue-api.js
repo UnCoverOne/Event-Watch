@@ -127,6 +127,8 @@ function inferPlayScope(record, scope, known) {
       matchedCity = record.city || nearest.city || null;
   }
 
+  if (!matchedCity && scope.city && cityMatches(record.city, scope.city))
+    matchedCity = record.city || scope.city;
   if (!matchedCity && !city) return record;
   if (!matchedCity && city && !known.cities.has(city)) return record;
 
@@ -302,12 +304,38 @@ async function refreshPlayRegion(env, scope, request) {
   if (scope.country === "*") return null;
 
   const knownLocations = await knownScopeLocations(env, scope);
-  const { anchors, distanceMeters } = playRegionalAnchors(
+  const cf = request.cf || {};
+  if (String(cf.country || "").toUpperCase() === scope.country) {
+    if (cf.city) {
+      const key = placeKey(cf.city);
+      if (key && !knownLocations.cities.has(key))
+        knownLocations.cities.set(key, cf.city);
+    }
+    if (
+      Number.isFinite(Number(cf.latitude)) &&
+      Number.isFinite(Number(cf.longitude))
+    )
+      knownLocations.points.unshift({
+        city: cf.city || null,
+        latitude: Number(cf.latitude),
+        longitude: Number(cf.longitude),
+      });
+  }
+
+  let { anchors, distanceMeters } = playRegionalAnchors(
     scope,
     knownLocations,
     request,
   );
-  if (!anchors.length) return null;
+  let broadFallback = false;
+  if (!anchors.length) {
+    // Bootstrap a country/city whose stores are not indexed yet. Play requires
+    // coordinates, but accepts a world-scale radius; scope filtering below
+    // ensures only relevant records are written.
+    anchors = [{ latitude: 0, longitude: 0 }];
+    distanceMeters = 40075000;
+    broadFallback = true;
+  }
 
   const seenTournamentIds = new Set();
   let imported = 0;
@@ -390,7 +418,52 @@ async function refreshPlayRegion(env, scope, request) {
     pages,
     complete,
     regional: true,
+    broadFallback,
   };
+}
+
+const PLAY_BROWSE_REFRESH_SECONDS = 10 * 60;
+function playBrowseRefreshCache() {
+  return globalThis.caches?.default || null;
+}
+function playBrowseRefreshKey(scope) {
+  const country = encodeURIComponent(scope.country || "*");
+  const city = encodeURIComponent(placeKey(scope.city || ""));
+  return new Request(
+    `https://event-watch.internal/play-browse-refresh/${country}/${city}`,
+  );
+}
+async function refreshPlayBrowseIfDue(env, scope, request) {
+  if (!scope.sources.includes("play")) return null;
+  const cache = playBrowseRefreshCache();
+  if (!cache) return null;
+  const key = playBrowseRefreshKey(scope);
+  if (await cache.match(key)) return null;
+
+  let result;
+  try {
+    result = await refreshPlayRegion(env, scope, request);
+    if (!result)
+      result = await safeSyncCatalogue(env, {
+        source: "play",
+        force: true,
+        enabled: scope.sources,
+      });
+  } catch (error) {
+    console.error("Automatic Play browse refresh failed", error.message);
+    return null;
+  }
+
+  if (!result?.error)
+    await cache.put(
+      key,
+      new Response("1", {
+        headers: {
+          "cache-control": `public, max-age=${PLAY_BROWSE_REFRESH_SECONDS}`,
+        },
+      }),
+    );
+  return result;
 }
 
 async function scopedUvsStores(env, scope) {
@@ -649,6 +722,7 @@ export async function handleCatalogueApi(request, env) {
       const scope = await browseScope(env, user, p);
       if (!scope?.sources.length)
         return json({ items: [], total: 0, page: 1, pages: 0, setup_required: true });
+      await refreshPlayBrowseIfDue(env, scope, request);
       const constraints = scopeConditions(scope, kind);
       where.push(...constraints.where);
       args.push(...constraints.args);

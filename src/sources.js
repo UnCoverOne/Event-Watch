@@ -334,7 +334,7 @@ export async function fetchSourcePage(source, cursor = null) {
         },
       },
       sortBy: {},
-      first: 10,
+      first: 50,
       ...(cursor ? { after: cursor } : {}),
     });
     const listing = data.competeTournamentSearch;

@@ -4,6 +4,7 @@ import { fetchEvent, fetchLgsStore } from './adapters.js';
 import { nowIso, uuid } from './utils.js';
 import { sendWatchDigestEmail } from './email.js';
 import { nextCheckAt } from './schedule.js';
+import { fetchPlayStoreEvents } from './sources.js';
 
 export async function runChecks(env) {
   const dueAt = nowIso();
@@ -181,13 +182,20 @@ export async function checkOneLgs(env, store, options = {}) {
 
   try {
     let snapshot;
-    if (store.source === 'play' || store.source_id) {
-      if (store.source === 'play') {
-        const sync = await env.DB.prepare("SELECT last_completed_at FROM catalogue_sync WHERE source = 'play'").first();
-        if (!sync?.last_completed_at) throw new Error('The initial Play Riftbound catalogue import is still running.');
-      }
+    if (store.source === 'play') {
+      snapshot = await fetchPlayStoreEvents(store);
+    } else if (store.source_id) {
       const events = await catalogueStoreEvents(env, store, { refresh: store.source === 'uvs' });
-      snapshot = { title: store.title, events: events.map(e => ({ eventKey: store.source === 'uvs' ? e.event_key.replace(/^riftbound:/, '') : e.event_key, eventUrl: e.event_url, title: e.title })) };
+      snapshot = {
+        title: store.title,
+        events: events.map((e) => ({
+          eventKey: store.source === 'uvs'
+            ? e.event_key.replace(/^riftbound:/, '')
+            : e.event_key,
+          eventUrl: e.event_url,
+          title: e.title,
+        })),
+      };
     } else snapshot = await fetchLgsStore(store);
     const storeTitle = snapshot.title || store.title || 'Watched LGS';
 

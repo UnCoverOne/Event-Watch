@@ -389,6 +389,75 @@ test("Refresh results forces selected catalogue sources before returning", async
   db.close();
 });
 
+test("Browse bootstraps missing Play stores and events in the same response", async (t) => {
+  const { db, request } = await fixture();
+  db.prepare("UPDATE user_browse_preferences SET config = ? WHERE user_id = 'u'")
+    .run(JSON.stringify({ sources: ["play"], country: "RO", city: "București" }));
+
+  class MemoryCache {
+    constructor() { this.rows = new Map(); }
+    async put(req, response) { this.rows.set(req.url, response); }
+    async match(req) { return this.rows.get(req.url) || undefined; }
+  }
+  const priorCaches = globalThis.caches;
+  globalThis.caches = { default: new MemoryCache() };
+
+  let calls = 0;
+  t.mock.method(globalThis, "fetch", async (url) => {
+    calls++;
+    const parsed = new URL(url);
+    assert.equal(parsed.searchParams.get("operationName"), "CompeteTournamentSearch");
+    const variables = JSON.parse(parsed.searchParams.get("variables"));
+    assert.equal(variables.first, 50);
+    assert.deepEqual(variables.filter.rb.coords, { latitude: 0, longitude: 0 });
+    assert.equal(variables.filter.rb.distanceMeters, 40075000);
+    return Response.json({
+      data: {
+        competeTournamentSearch: {
+          edges: [{
+            node: {
+              tournament: {
+                id: "ramcards-auto-event",
+                name: "Radiance Pre-Rift Event | RamCards",
+                startsAt: "2099-10-16T16:00:00Z",
+                registrantCounts: [],
+                config: {},
+              },
+              organizer: {
+                id: "ramcards-auto-store",
+                name: "RamCards",
+                physicalAddress: {
+                  formattedAddress: "Strada RamCards 1, București",
+                  city: "București",
+                  latitude: 44.44,
+                  longitude: 26.10,
+                },
+              },
+            },
+          }],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      },
+    });
+  });
+
+  try {
+    const events = await request("/api/catalogue/events");
+    assert.equal(events.total, 1);
+    assert.equal(events.items[0].host_lgs, "RamCards");
+    assert.equal(events.items[0].country, "RO");
+
+    const stores = await request("/api/catalogue/stores");
+    assert.equal(stores.total, 1);
+    assert.equal(stores.items[0].title, "RamCards");
+    assert.equal(stores.items[0].country, "RO");
+    assert.equal(calls, 1);
+  } finally {
+    globalThis.caches = priorCaches;
+    db.close();
+  }
+});
+
 test("Play country refresh covers distant known cities with separate Riot searches", async (t) => {
   const { env, db, request } = await fixture();
   db.prepare("UPDATE user_browse_preferences SET config = ? WHERE user_id = 'u'")
@@ -661,6 +730,7 @@ test("Play Riftbound uses its public persisted operation and rejects GraphQL err
       },
     });
     assert.deepEqual(variables.sortBy, {});
+    assert.equal(variables.first, 50);
     assert.deepEqual(extensions.clientLibrary, { name: "@apollo/client", version: "4.1.2" });
     assert.equal(extensions.persistedQuery.sha256Hash, "9e2e6f2d6f9d08baac662f04222dfce639a327d0c41d7fcacc2d13d535daf55a");
     return Response.json(

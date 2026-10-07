@@ -15,18 +15,18 @@
 }
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #f7f5fb;
-  --surface: #fff;
-  --surface-2: #efebf6;
-  --text: #241d30;
-  --muted: #6b6278;
-  --line: #e0d9eb;
-  --accent: #cdb4ff;
-  --accent-text: #281540;
-  --accent-ink: #7443a6;
-  --danger: #a52626;
-  --input: #fff;
-  --shadow: rgba(0, 0, 0, 0.04);
+  --bg: #e9e6ef;
+  --surface: #f3f0f6;
+  --surface-2: #e2dce9;
+  --text: #2a2333;
+  --muted: #655d70;
+  --line: #d3ccd9;
+  --accent: #bea6eb;
+  --accent-text: #2b183f;
+  --accent-ink: #70449e;
+  --danger: #9d2d2d;
+  --input: #efebf2;
+  --shadow: rgba(28, 22, 36, 0.08);
 }
 * {
   box-sizing: border-box;

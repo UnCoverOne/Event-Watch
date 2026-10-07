@@ -7,7 +7,7 @@ const BUILD_ID = (
 const CACHE_PREFIX = 'event-watch-shell-';
 const CACHE_NAME = `${CACHE_PREFIX}${BUILD_ID}`;
 const OFFLINE_URL = '/offline.html';
-const PRECACHE = [OFFLINE_URL, '/icons/icon-192.png?v=2'];
+const PRECACHE = [OFFLINE_URL, '/icons/icon-192.png?v=3', '/icons/favicon.svg?v=3'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
@@ -88,7 +88,7 @@ self.addEventListener('push', (event) => {
   try { payload = event.data?.json() || {}; } catch { /* Show a visible fallback. */ }
   event.waitUntil(self.registration.showNotification(payload.title || 'Event Watch update', {
     body: payload.body || 'One of your watched pages has changed.',
-    icon: '/icons/icon-192.png?v=2', badge: '/icons/icon-192.png?v=2',
+    icon: '/icons/icon-192.png?v=3', badge: '/icons/icon-192.png?v=3',
     tag: payload.tag || 'event-watch-update',
     data: { url: payload.url || '/' },
   }));

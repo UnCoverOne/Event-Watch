@@ -13,13 +13,25 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - run: npm ci
       - name: Run tests
         run: npm test
+      - name: Check for D1 migration changes
+        id: migrations
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]] || ! git diff --quiet HEAD^ HEAD -- migrations/; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Apply D1 migrations
+        if: steps.migrations.outputs.changed == 'true'
         run: npx wrangler d1 migrations apply DB --remote
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

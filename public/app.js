@@ -18,8 +18,16 @@ const state = {
 };
 const INTERVALS = [5, 10, 15, 30, 60, 180, 360, 720, 1440];
 const LABELS = {
-  browse: ['Browse'], bookmarks: ['Bookmarks'], watching: ['Watching'], joined: ['Joined'], archive: ['Archive'],
+  browse: ["Browse"],
+  collection: ["Collection"],
 };
+const LEGACY_COLLECTION_VIEWS = {
+  bookmarks: "bookmarked",
+  watching: "watching",
+  joined: "joined",
+  archive: "archived",
+};
+const DEFAULT_COLLECTION_FILTERS = ["watching", "bookmarked", "joined"];
 const SOURCE = {
   uvs: "UVS Gaming Network",
   play: "Play Riftbound",
@@ -86,6 +94,23 @@ $("kindTabs").addEventListener("click", (event) => {
   if (!button) return;
   const url = new URL(location.href);
   url.searchParams.set("kind", button.dataset.kind);
+  url.searchParams.delete("page");
+  navigate(url);
+});
+$("collectionFilters").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-collection-filter]");
+  if (!button || state.view !== "collection") return;
+  const url = new URL(location.href);
+  const selected = new Set(collectionFilters(url.searchParams));
+  const key = button.dataset.collectionFilter;
+  if (selected.has(key)) selected.delete(key);
+  else selected.add(key);
+  url.searchParams.set(
+    "collection",
+    ["watching", "bookmarked", "joined", "archived"]
+      .filter((value) => selected.has(value))
+      .join(","),
+  );
   url.searchParams.delete("page");
   navigate(url);
 });
@@ -339,7 +364,15 @@ function navigate(url) {
 }
 async function route() {
   const params = new URL(location.href).searchParams;
-  state.view = LABELS[params.get("view")] ? params.get("view") : "browse";
+  const requestedView = params.get("view") || "browse";
+  if (LEGACY_COLLECTION_VIEWS[requestedView]) {
+    const url = new URL(location.href);
+    url.searchParams.set("view", "collection");
+    url.searchParams.set("collection", LEGACY_COLLECTION_VIEWS[requestedView]);
+    history.replaceState({}, "", url.pathname + url.search);
+    return route();
+  }
+  state.view = LABELS[requestedView] ? requestedView : "browse";
   state.kind = ["store", "lgs"].includes(params.get("kind"))
     ? "store"
     : "event";
@@ -392,10 +425,24 @@ async function route() {
   if (state.view === "browse" && !state.preferences?.sources.length) return showSourceSetup();
   $("browseView").classList.remove("hidden");
   $("detailView").classList.add("hidden");
-  if (state.view === "joined") state.kind = "event";
   $("pageTitle").textContent = LABELS[state.view][0];
-  document.title = `${state.view === "browse" ? "Browse" : pretty(state.view)} | Event Watch`;
-  $("kindTabs").classList.toggle("hidden", state.view === "joined");
+  document.title = `${LABELS[state.view][0]} | Event Watch`;
+  $("kindTabs").classList.remove("hidden");
+  $("collectionFilters").classList.toggle("hidden", state.view !== "collection");
+  $("reloadButton").classList.toggle("hidden", state.view !== "browse");
+  document.querySelector(".sort-label").classList.toggle(
+    "hidden",
+    state.view === "collection",
+  );
+  const selectedCollection = new Set(collectionFilters(params));
+  document.querySelectorAll("[data-collection-filter]").forEach((button) => {
+    const active = selectedCollection.has(button.dataset.collectionFilter);
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  document.querySelectorAll(".event-collection-filter").forEach((button) =>
+    button.classList.toggle("hidden", state.kind !== "event"),
+  );
   document.querySelectorAll("#kindTabs button").forEach((b) => {
     b.classList.toggle("active", b.dataset.kind === state.kind);
     b.setAttribute("aria-pressed", String(b.dataset.kind === state.kind));
@@ -419,7 +466,8 @@ async function route() {
       el.add(new Option(pretty(value), value));
     el.value = value;
   }
-  $("sortSelect").value = params.get("sort") || "date";
+  $("sortSelect").value =
+    state.view === "collection" ? "date" : params.get("sort") || "date";
   $("browseScope").classList.toggle("hidden", state.view !== "browse");
   if (state.view === "browse") {
     const pref = state.preferences;
@@ -434,6 +482,19 @@ async function route() {
     $("sourceFilter").value = params.get("source") || "";
   }
   await loadResults();
+}
+function collectionFilters(params = new URL(location.href).searchParams) {
+  const raw = params.get("collection");
+  if (raw === null) return [...DEFAULT_COLLECTION_FILTERS];
+  const allowed = new Set(["watching", "bookmarked", "joined", "archived"]);
+  return [
+    ...new Set(
+      raw
+        .split(",")
+        .map((value) => value.trim())
+        .filter((value) => allowed.has(value)),
+    ),
+  ];
 }
 function applyFilters() {
   const url = new URL(location.href);
@@ -457,7 +518,8 @@ function applyFilters() {
         ].includes(key))
     )
       url.searchParams.set(key, value);
-  url.searchParams.set("sort", $("sortSelect").value);
+  if (state.view !== "collection")
+    url.searchParams.set("sort", $("sortSelect").value);
   navigate(url);
 }
 function resetFilters() {
@@ -564,6 +626,7 @@ async function loadResults() {
     const params = new URL(location.href).searchParams;
     params.set("view", state.view);
     params.set("page", state.page);
+    if (state.view === "collection") params.set("sort", "date");
     if (state.view === "browse") for (const [key, value] of scopeParams()) params.set(key, value);
     const url = `/api/catalogue/${state.kind === "event" ? "events" : "stores"}?${params}`;
     const cacheKey = `${state.user?.id || 'guest'}:${JSON.stringify(state.preferences)}:${url}`;
@@ -833,7 +896,7 @@ function syncTheme() {
   $("themeToggle").setAttribute("aria-checked", String(dark));
   document.querySelector('meta[name="theme-color"]').content = dark
     ? "#0c0d0f"
-    : "#f7f5fb";
+    : "#e9e6ef";
 }
 function status(value) {
   return `<span class="status ${value === "AVAILABLE" ? "available" : value === "FULL" ? "full" : value === "NOT_OPEN" ? "not-open" : ""}">${esc({ AVAILABLE: "Available", FULL: "Full", NOT_OPEN: "Not open yet", CLOSED: "Closed", UNAVAILABLE: "Unavailable", UNKNOWN: "Unknown" }[value] || "Unknown")}</span>`;

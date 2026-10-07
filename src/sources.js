@@ -238,6 +238,88 @@ export function playEvent(
     capacity,
   };
 }
+export async function fetchPlayStoreEvents(
+  store,
+  { distanceMeters = 1_000_000, maxPages = 20 } = {},
+) {
+  const organizerId = String(store?.source_id || "");
+  if (!organizerId) throw new Error("Play Riftbound store is missing an organizer ID.");
+
+  let latitude = number(store.latitude);
+  let longitude = number(store.longitude);
+  let title = store.title || null;
+
+  // Older indexed organizer rows can be sparse. Refresh only the organizer
+  // metadata needed to run a direct store check; this does not touch D1.
+  if (latitude == null || longitude == null) {
+    const data = await playQuery("OrganizerSummary", { id: organizerId });
+    const organizer = data.organizerSummary;
+    if (!organizer || String(organizer.id) !== organizerId)
+      throw new Error("This Play Riftbound organizer was not found.");
+    const normalized = playStore(organizer);
+    latitude = normalized.latitude;
+    longitude = normalized.longitude;
+    title = normalized.title || title;
+  }
+
+  if (latitude == null || longitude == null)
+    throw new Error("This Play Riftbound organizer has no searchable location.");
+
+  const events = [];
+  const seen = new Set();
+  let after = null;
+
+  for (let page = 0; page < maxPages; page++) {
+    const data = await playQuery("CompeteTournamentSearch", {
+      sport: "rb",
+      filter: {
+        rb: {
+          coords: { latitude, longitude },
+          // Play has no organizer-id filter in the public persisted query.
+          // Search a deliberately broad area, then require exact organizer ID.
+          distanceMeters,
+        },
+      },
+      sortBy: {},
+      first: 50,
+      ...(after ? { after } : {}),
+    });
+
+    const listing = data.competeTournamentSearch;
+    if (!Array.isArray(listing?.edges) || !listing.pageInfo)
+      throw new Error("Invalid Play Riftbound store listing.");
+
+    for (const edge of listing.edges) {
+      const tournament = edge.node?.tournament;
+      const organizer = edge.node?.organizer;
+      if (
+        !tournament ||
+        !organizer ||
+        String(organizer.id) !== organizerId
+      )
+        continue;
+
+      const record = playEvent(tournament, organizer);
+      if (seen.has(record.key)) continue;
+      seen.add(record.key);
+      events.push({
+        eventKey: record.key,
+        eventUrl: record.url,
+        title: record.title,
+      });
+      title = organizer.name || title;
+    }
+
+    if (!listing.pageInfo.hasNextPage) return { title, events };
+    const next = listing.pageInfo.endCursor;
+    if (!next || next === after)
+      throw new Error("Invalid Play Riftbound store pagination.");
+    after = next;
+  }
+
+  throw new Error("Play Riftbound store listing exceeded the page limit.");
+}
+
 export async function fetchSourcePage(source, cursor = null) {
   if (source === "play") {
     const data = await playQuery("CompeteTournamentSearch", {

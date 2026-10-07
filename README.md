@@ -33,6 +33,8 @@ Exact source IDs/URLs are deduplicated. Listings from different sources are merg
 
 ## Personal state and notifications
 
+The main navigation has two destinations: **Browse** and **Collection**. Collection combines watched, bookmarked, joined and archived items in one list. Watched, Bookmarked and Joined are shown by default; Archived is hidden until its chip is enabled. Event collections default to upcoming items sorted by soonest date, while the existing Time filter can include past events. Stores use the same Collection chips except Joined, which only applies to events.
+
 The shared catalogue is separate from each user's subscriptions. `bookmarked`, `watching`, `joined` (events only) and `archived` are independent flags. The existing `active` flag represents notification eligibility:
 
 - Event: watching and not joined and not archived.
@@ -60,7 +62,7 @@ The app uses Workers, D1, Cron Triggers and plain HTML/CSS/JavaScript. There is 
 
 ## Deployment
 
-Pushes to `main` run `.github/workflows/deploy.yml`: install dependencies, run tests, apply D1 migrations, then deploy the Worker and assets. The existing GitHub secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are required. Manual `workflow_dispatch` is also supported.
+Pushes to `main` run `.github/workflows/deploy.yml`: install dependencies, run tests, apply D1 migrations only when `migrations/` changed, then deploy the Worker and assets. The existing GitHub secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are required. Manual `workflow_dispatch` is also supported.
 
 ```sh
 npm run db:migrate:remote

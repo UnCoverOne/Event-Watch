@@ -207,6 +207,94 @@ test("guest browsing, combined filters, pagination and literal search", async ()
   );
   db.close();
 });
+test("Collection combines saved states, hides archived and past events by default, and sorts soonest", async () => {
+  const { env, db, request } = await fixture();
+
+  const watched = await saveRecord(
+    env,
+    "event",
+    uvsEvent({ ...raw(901), start_datetime: "2099-10-09T18:00:00Z" }),
+  );
+  const bookmarked = await saveRecord(
+    env,
+    "event",
+    uvsEvent({ ...raw(902), start_datetime: "2099-10-07T18:00:00Z" }),
+  );
+  const joined = await saveRecord(
+    env,
+    "event",
+    uvsEvent({ ...raw(903), start_datetime: "2099-10-08T18:00:00Z" }),
+  );
+  const archived = await saveRecord(
+    env,
+    "event",
+    uvsEvent({ ...raw(904), start_datetime: "2099-10-10T18:00:00Z" }),
+  );
+  const past = await saveRecord(
+    env,
+    "event",
+    uvsEvent({ ...raw(905), start_datetime: "2020-10-06T18:00:00Z" }),
+  );
+
+  await request(`/api/catalogue/event/${watched}/state`, "PATCH", {
+    watching: true,
+  });
+  await request(`/api/catalogue/event/${bookmarked}/state`, "PATCH", {
+    bookmarked: true,
+  });
+  await request(`/api/catalogue/event/${joined}/state`, "PATCH", {
+    joined: true,
+  });
+  await request(`/api/catalogue/event/${archived}/state`, "PATCH", {
+    bookmarked: true,
+    archived: true,
+  });
+  await request(`/api/catalogue/event/${past}/state`, "PATCH", {
+    bookmarked: true,
+  });
+
+  const collection = await request("/api/catalogue/events?view=collection");
+  assert.equal(collection.total, 3);
+  assert.deepEqual(
+    collection.items.map((item) => item.id),
+    [bookmarked, joined, watched],
+  );
+
+  const withArchive = await request(
+    "/api/catalogue/events?view=collection&collection=watching,bookmarked,joined,archived",
+  );
+  assert.equal(withArchive.total, 4);
+  assert.ok(withArchive.items.some((item) => item.id === archived));
+
+  const archivedOnly = await request(
+    "/api/catalogue/events?view=collection&collection=archived",
+  );
+  assert.deepEqual(archivedOnly.items.map((item) => item.id), [archived]);
+
+  const bookmarksWithPast = await request(
+    "/api/catalogue/events?view=collection&collection=bookmarked&when=all",
+  );
+  assert.deepEqual(
+    bookmarksWithPast.items.map((item) => item.id),
+    [past, bookmarked],
+  );
+
+  const noChips = await request(
+    "/api/catalogue/events?view=collection&collection=",
+  );
+  assert.equal(noChips.total, 0);
+
+  await assert.rejects(
+    request("/api/catalogue/events?view=collection&collection=wat"),
+    (error) => error.status === 400,
+  );
+  await assert.rejects(
+    request("/api/catalogue/events?view=collection", "GET", undefined, false),
+    (error) => error.status === 401,
+  );
+  db.close();
+});
+
 test("bookmarks, watches, joined and archive are independent and isolated per account", async () => {
   const { env, db, request } = await fixture();
   const id = await saveRecord(env, "event", uvsEvent(raw()));

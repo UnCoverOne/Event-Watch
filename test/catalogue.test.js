@@ -17,6 +17,7 @@ import {
   playStore,
   countryCodeFromFormattedAddress,
   fetchSourcePage,
+  fetchPlayStoreEvents,
   parsePlayEventUrl,
 } from "../src/sources.js";
 import {
@@ -798,6 +799,144 @@ test("store watchers baseline existing listings, notify only new events, and arc
   assert.equal(result.skipped, true);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM alert_queue").get().n, 0);
   db.close();
+});
+
+test("Play store watches fetch exact organizer events without catalogue sync", async (t) => {
+  const { env, db, request } = await fixture();
+  const organizer = {
+    id: "org-direct",
+    name: "Direct Play Store",
+    physicalAddress: {
+      formattedAddress: "1 Test Street, București, Romania",
+      city: "București",
+      latitude: 44.4268,
+      longitude: 26.1025,
+    },
+  };
+  const id = await saveRecord(env, "store", playStore(organizer));
+  const { state } = await request(`/api/catalogue/store/${id}/state`, "PATCH", {
+    watching: true,
+  });
+  db.prepare("UPDATE catalogue_sync SET last_completed_at = NULL WHERE source = 'play'").run();
+
+  let tournaments = [{
+    id: "play-one",
+    name: "Play Event One",
+    startsAt: "2099-11-01T18:00:00Z",
+    registrantCounts: [],
+    config: {},
+  }];
+  let calls = 0;
+  t.mock.method(globalThis, "fetch", async (url) => {
+    calls++;
+    const parsed = new URL(url);
+    assert.equal(parsed.searchParams.get("operationName"), "CompeteTournamentSearch");
+    const variables = JSON.parse(parsed.searchParams.get("variables"));
+    assert.deepEqual(variables.filter.rb.coords, {
+      latitude: 44.4268,
+      longitude: 26.1025,
+    });
+    assert.equal(variables.filter.rb.distanceMeters, 1_000_000);
+    return Response.json({
+      data: {
+        competeTournamentSearch: {
+          edges: [
+            ...tournaments.map((tournament) => ({
+              node: { tournament, organizer },
+            })),
+            {
+              node: {
+                tournament: {
+                  id: "other-store-event",
+                  name: "Ignore Me",
+                  startsAt: "2099-11-01T18:00:00Z",
+                  registrantCounts: [],
+                  config: {},
+                },
+                organizer: { ...organizer, id: "different-organizer" },
+              },
+            },
+          ],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      },
+    });
+  });
+
+  const item = db.prepare("SELECT * FROM lgs_stores WHERE id=?").get(id);
+  let result = await checkOneLgs(env, item, { subscriptionId: state.id });
+  assert.equal(result.alertsQueued, 0);
+  assert.equal(result.listedEvents, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM events").get().n, 0);
+
+  tournaments = [
+    ...tournaments,
+    {
+      id: "play-two",
+      name: "Play Event Two",
+      startsAt: "2099-11-02T18:00:00Z",
+      registrantCounts: [],
+      config: {},
+    },
+  ];
+  result = await checkOneLgs(env, item, { subscriptionId: state.id });
+  assert.equal(result.alertsQueued, 1);
+  assert.equal(result.newEventsFound, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM events").get().n, 0);
+  assert.equal(calls, 2);
+  db.close();
+});
+
+test("Play store source helper paginates and filters by exact organizer ID", async (t) => {
+  const store = {
+    source_id: "org-a",
+    title: "Store A",
+    latitude: 44.4,
+    longitude: 26.1,
+  };
+  let call = 0;
+  t.mock.method(globalThis, "fetch", async (url) => {
+    call++;
+    const parsed = new URL(url);
+    const variables = JSON.parse(parsed.searchParams.get("variables"));
+    assert.equal(variables.first, 50);
+    assert.equal(variables.after ?? null, call === 1 ? null : "next-page");
+    const organizer = {
+      id: "org-a",
+      name: "Store A",
+      physicalAddress: {
+        formattedAddress: "București, Romania",
+        city: "București",
+        latitude: 44.4,
+        longitude: 26.1,
+      },
+    };
+    return Response.json({
+      data: {
+        competeTournamentSearch: {
+          edges: [{
+            node: {
+              tournament: {
+                id: call === 1 ? "one" : "two",
+                name: call === 1 ? "One" : "Two",
+                startsAt: "2099-11-01T18:00:00Z",
+                registrantCounts: [],
+                config: {},
+              },
+              organizer,
+            },
+          }],
+          pageInfo: {
+            hasNextPage: call === 1,
+            endCursor: call === 1 ? "next-page" : null,
+          },
+        },
+      },
+    });
+  });
+  const result = await fetchPlayStoreEvents(store);
+  assert.deepEqual(result.events.map((e) => e.eventKey), ["play:one", "play:two"]);
+  assert.equal(call, 2);
 });
 
 test("legacy display dates become sortable and past listings leave upcoming browse", async () => {

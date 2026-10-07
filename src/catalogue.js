@@ -9,7 +9,7 @@ import {
   fetchPlayEvent,
   countryCodeFromFormattedAddress,
 } from "./sources.js";
-import { nowIso, uuid } from "./utils.js";
+import { nowIso, sha256, uuid } from "./utils.js";
 
 const textKey = (value) =>
   String(value || "")
@@ -97,18 +97,72 @@ export function fingerprint(kind, item) {
     : null;
 }
 
+function contentHashPayload(kind, item) {
+  const common = {
+    source: item.source ?? null,
+    source_id: item.source_id ?? null,
+    url: item.url ?? null,
+    title: item.title ?? null,
+    city: item.city ?? null,
+    country: item.country ?? null,
+    address: item.address ?? null,
+    latitude: item.latitude ?? null,
+    longitude: item.longitude ?? null,
+    fingerprint: fingerprint(kind, item),
+  };
+  if (kind === "store") return common;
+  return {
+    ...common,
+    starts_at: item.starts_at ?? null,
+    event_date: item.event_date ?? null,
+    host_lgs: item.host_lgs ?? null,
+    format: item.format ?? null,
+    category: item.category ?? null,
+    price_minor: item.price_minor ?? null,
+    currency: item.currency ?? null,
+    description: item.description ?? null,
+    status: item.status ?? null,
+    status_reason: item.status_reason ?? null,
+    current_players: item.current_players ?? null,
+    capacity: item.capacity ?? null,
+    store: item.store ? contentHashPayload("store", item.store) : null,
+  };
+}
+
+async function recordContentHash(kind, item) {
+  return sha256(JSON.stringify(contentHashPayload(kind, item)));
+}
+
 export async function saveRecord(env, kind, item, at = nowIso()) {
   const table = kind === "event" ? "events" : "lgs_stores";
   const keyColumn = kind === "event" ? "event_key" : "store_key";
   const urlColumn = kind === "event" ? "event_url" : "store_url";
   const fp = fingerprint(kind, item);
-  let existing = await env.DB.prepare(
-    `SELECT e.* FROM ${table} e WHERE e.${keyColumn} = ? OR e.id IN
-    (SELECT entity_id FROM catalogue_sources WHERE kind = ? AND source = ? AND source_key = ?)
-    OR (e.source = ? AND e.source_id = ?) LIMIT 1`,
+  // Detail refreshes intentionally invalidate the listing fingerprint so the
+  // next catalogue pass reconciles any fields whose source representations differ.
+  const contentHash = item.detail ? null : await recordContentHash(kind, item);
+  const sourceAlias = await env.DB.prepare(
+    `SELECT entity_id, content_hash FROM catalogue_sources
+     WHERE kind = ? AND source = ? AND source_key = ?`,
   )
-    .bind(item.key, kind, item.source, item.key, item.source, item.source_id)
+    .bind(kind, item.source, item.key)
     .first();
+  if (contentHash && sourceAlias?.content_hash === contentHash)
+    return sourceAlias.entity_id;
+
+  let existing = sourceAlias?.entity_id
+    ? await env.DB.prepare(`SELECT * FROM ${table} WHERE id = ?`)
+        .bind(sourceAlias.entity_id)
+        .first()
+    : null;
+  if (!existing)
+    existing = await env.DB.prepare(
+      `SELECT * FROM ${table}
+       WHERE ${keyColumn} = ? OR (source = ? AND source_id = ?)
+       LIMIT 1`,
+    )
+      .bind(item.key, item.source, item.source_id)
+      .first();
   if (!existing && fp)
     existing = await env.DB.prepare(
       `SELECT * FROM ${table} WHERE fingerprint = ? LIMIT 1`,
@@ -208,10 +262,18 @@ export async function saveRecord(env, kind, item, at = nowIso()) {
     }
   }
   await env.DB.prepare(
-    `INSERT INTO catalogue_sources (kind, source, source_key, entity_id, url) VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(kind, source, source_key) DO UPDATE SET entity_id = excluded.entity_id, url = excluded.url`,
+    `INSERT INTO catalogue_sources
+      (kind, source, source_key, entity_id, url, content_hash)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(kind, source, source_key) DO UPDATE SET
+       entity_id = excluded.entity_id,
+       url = excluded.url,
+       content_hash = excluded.content_hash
+     WHERE catalogue_sources.entity_id IS NOT excluded.entity_id
+        OR catalogue_sources.url IS NOT excluded.url
+        OR catalogue_sources.content_hash IS NOT excluded.content_hash`,
   )
-    .bind(kind, item.source, item.key, id, item.url)
+    .bind(kind, item.source, item.key, id, item.url, contentHash)
     .run();
   return id;
 }
@@ -523,8 +585,10 @@ export async function catalogueStoreEvents(
         if (String(r.store?.id) !== store.source_id)
           throw new Error("Source returned events from a different store.");
         const id = await saveRecord(env, "event", uvsEvent(r));
-        await env.DB.prepare("UPDATE events SET store_id = ? WHERE id = ?")
-          .bind(store.id, id)
+        await env.DB.prepare(
+          "UPDATE events SET store_id = ? WHERE id = ? AND store_id IS NOT ?",
+        )
+          .bind(store.id, id, store.id)
           .run();
       }
       const next = data.next_page_number;

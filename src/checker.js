@@ -6,8 +6,10 @@ import { sendWatchDigestEmail } from './email.js';
 import { nextCheckAt } from './schedule.js';
 
 export async function runChecks(env) {
-  await pruneExpired(env);
   const dueAt = nowIso();
+  // Expired rows are never treated as valid; physical cleanup only needs to
+  // run hourly instead of on every five-minute watch pass.
+  if (new Date(dueAt).getUTCMinutes() === 0) await pruneExpired(env);
   const eventOutcomes = await runEventChecks(env, dueAt);
   const lgsOutcomes = await runLgsChecks(env, dueAt);
   const delivery = await flushAlertQueue(env);

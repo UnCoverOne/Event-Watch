@@ -142,6 +142,36 @@ test("additive migration preserves existing IDs, intervals and archive state", (
   );
   db.close();
 });
+test("unchanged catalogue records take the zero-write fast path", async () => {
+  const { env, db } = await fixture();
+  const record = uvsEvent(raw(333));
+  const firstAt = "2026-10-07T00:00:00.000Z";
+  const secondAt = "2026-10-07T00:05:00.000Z";
+
+  const id = await saveRecord(env, "event", record, firstAt);
+  const source = db.prepare(
+    "SELECT content_hash FROM catalogue_sources WHERE kind='event' AND source='uvs' AND source_key=?",
+  ).get(record.key);
+  assert.match(source.content_hash, /^[0-9a-f]{64}$/);
+
+  const before = db.prepare("SELECT total_changes() AS n").get().n;
+  assert.equal(await saveRecord(env, "event", record, secondAt), id);
+  const after = db.prepare("SELECT total_changes() AS n").get().n;
+  assert.equal(after, before);
+  assert.equal(
+    db.prepare("SELECT updated_at FROM events WHERE id=?").get(id).updated_at,
+    firstAt,
+  );
+
+  await saveRecord(env, "event", { ...record, title: "Changed title" }, secondAt);
+  assert.ok(db.prepare("SELECT total_changes() AS n").get().n > after);
+  assert.equal(
+    db.prepare("SELECT title FROM events WHERE id=?").get(id).title,
+    "Changed title",
+  );
+  db.close();
+});
+
 test("guest browsing, combined filters, pagination and literal search", async () => {
   const { env, db, request } = await fixture();
   for (let n = 0; n < 26; n++)

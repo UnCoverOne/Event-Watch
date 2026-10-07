@@ -1011,7 +1011,7 @@ async function api(url, options = {}) {
 if ("serviceWorker" in navigator)
   window.addEventListener("load", () =>
     navigator.serviceWorker
-      .register("/sw.js?build=2026-10-06-polish-v3", {
+      .register("/sw.js?build=2026-10-07-brand-v1", {
         scope: "/",
         updateViaCache: "none",
       })

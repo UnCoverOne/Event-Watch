@@ -504,8 +504,18 @@ main {
   min-width: 0;
   transition: border-color 0.15s;
 }
+/* Separate event/store cards from the near-black canvas in dark mode. */
+:root[data-theme="dark"] .result-card {
+  background: #1e2229;
+  border-color: #3b414c;
+  box-shadow: 0 5px 18px rgba(0, 0, 0, 0.25);
+}
 .result-card:hover {
   border-color: var(--muted);
+}
+:root[data-theme="dark"] .result-card:hover {
+  border-color: color-mix(in srgb, var(--accent-ink) 45%, #3b414c);
+  box-shadow: 0 9px 24px rgba(0, 0, 0, 0.32);
 }
 .card-body {
   padding: 20px;

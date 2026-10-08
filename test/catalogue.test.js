@@ -227,6 +227,14 @@ test("multiple City, Store and source facets filter scoped catalogue results", a
   assert.equal(data.total, 3);
   data = await request("/api/catalogue/events?city=Unknown");
   assert.equal(data.total, 0);
+  db.prepare("UPDATE events SET format = ?, category = ? WHERE id = ?").run("CONSTRUCTED", "LOCAL_EVENT", ids[0]);
+  db.prepare("UPDATE events SET format = ?, category = ? WHERE id = ?").run("TWIN_SUNS", "WEEKLY_EVENT", ids[1]);
+  db.prepare("UPDATE events SET format = ?, category = ? WHERE id = ?").run("Twin Suns", "Weekly Event", ids[2]);
+  data = await request("/api/catalogue/events?format=Constructed");
+  assert.deepEqual(data.items.map(item => item.id), [ids[0]]);
+  data = await request("/api/catalogue/events?format=Twin+Suns&category=Weekly+Event");
+  assert.equal(data.total, 2);
+  assert.deepEqual(new Set(data.items.map(item => item.id)), new Set([ids[1], ids[2]]));
   const filters = await request("/api/catalogue/filters?view=browse&kind=event");
   assert.deepEqual(filters.city, ["Bristol", "London", "Manchester"]);
   assert.ok(filters.store.includes("Test Games"));

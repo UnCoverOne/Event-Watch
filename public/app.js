@@ -494,7 +494,7 @@ async function route() {
   for (const key of FILTERS) {
     const el = $(`${key}Filter`);
     if (MULTI_FILTERS.includes(key)) {
-      state.selectedFilters[key] = [...new Set(params.getAll(key).filter(Boolean))];
+      state.selectedFilters[key] = uniqueFilterValues(key, params.getAll(key));
       el.value = state.selectedFilters[key][0] || "";
     } else el.value = params.get(key) || (key === "when" ? "upcoming" : "");
   }
@@ -560,8 +560,26 @@ function restoreSavedFilters(url) {
   for (const [key, choice] of new URLSearchParams(value)) params.append(key, choice);
   history.replaceState({}, "", url.pathname + url.search);
 }
+// Values from separate feeds can differ in casing or use underscores for spaces.
+// Keep one displayed choice while retaining a query value compatible with both.
+function filterOptionIdentity(key, value) {
+  const text = key === "format" || key === "category" ? pretty(value) : String(value || "");
+  return text.normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase();
+}
+function uniqueFilterValues(key, values) {
+  const seen = new Set();
+  return values.filter(value => {
+    if (!value) return false;
+    const id = filterOptionIdentity(key, value);
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
 function filterChoiceLabel(key, value) {
-  const matched = (state.filterOptions[key] || STATIC_FILTER_OPTIONS[key] || []).find(([id]) => id === value);
+  const id = filterOptionIdentity(key, value);
+  const matched = (state.filterOptions[key] || STATIC_FILTER_OPTIONS[key] || [])
+    .find(([option]) => filterOptionIdentity(key, option) === id);
   return matched?.[1] || (key === "country" ? countryName(value) : SOURCE[value] || pretty(value));
 }
 function renderFilterButtons() {
@@ -602,7 +620,8 @@ function renderFilterChoices() {
   const known = state.filterOptions[key] || STATIC_FILTER_OPTIONS[key] || [];
   const options = [...known];
   for (const value of state.pendingFilter) {
-    if (!options.some(([id]) => id === value)) options.push([value, filterChoiceLabel(key, value)]);
+    if (!options.some(([id]) => filterOptionIdentity(key, id) === filterOptionIdentity(key, value)))
+      options.push([value, filterChoiceLabel(key, value)]);
   }
   const single = key === "when";
   for (const [value, title] of options) {
@@ -612,11 +631,15 @@ function renderFilterChoices() {
     input.type = single ? "radio" : "checkbox";
     input.name = "filter-choice";
     input.value = value;
-    input.checked = state.pendingFilter.has(value);
+    input.checked = [...state.pendingFilter].some(id =>
+      filterOptionIdentity(key, id) === filterOptionIdentity(key, value));
     input.addEventListener("change", () => {
-      if (single) state.pendingFilter.clear();
+      // Replace equivalent older saved values, rather than selecting them twice.
+      const identity = filterOptionIdentity(key, value);
+      for (const existing of state.pendingFilter)
+        if (single || filterOptionIdentity(key, existing) === identity)
+          state.pendingFilter.delete(existing);
       if (input.checked) state.pendingFilter.add(value);
-      else state.pendingFilter.delete(value);
       if (single) renderFilterChoices();
     });
     const text = document.createElement("span");
@@ -686,8 +709,15 @@ async function loadFilterOptions() {
     const data = await metadata(`/api/catalogue/filters?${query}`);
     if (prefs !== state.preferences || state.editingSources || state.view !== view || state.kind !== kind) return;
     for (const key of ["country", "city", "store", "format", "category"]) {
-      state.filterOptions[key] = (data[key] || []).map(value =>
-        [value, key === "country" ? countryName(value) : value]);
+      const seen = new Set();
+      state.filterOptions[key] = (data[key] || []).flatMap(value => {
+        const label = key === "country" ? countryName(value)
+          : key === "format" || key === "category" ? pretty(value) : value;
+        const identity = label.normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase();
+        if (seen.has(identity)) return [];
+        seen.add(identity);
+        return [[value, label]];
+      });
     }
     renderFilterButtons();
     if ($("filterDialog").open) renderFilterChoices();
@@ -835,8 +865,8 @@ function card(item, kind) {
 }
 function actions(item, kind) {
   const button = (key, label, value, pressed = false) =>
-    `<button class="small-button" type="button" data-state="${key}" data-id="${esc(item.id)}" data-kind="${kind}" data-value="${value}" aria-pressed="${pressed}">${label}</button>`;
-  return `<div class="card-actions">${button("bookmarked", item.bookmarked ? "★ Saved" : "☆ Save", !item.bookmarked, !!item.bookmarked)}${button("watching", item.watching ? "◉ Watching" : "◎ Watch", !item.watching, !!item.watching)}${kind === "event" ? button("joined", item.joined ? "✓ Joined" : "Mark joined", !item.joined, !!item.joined) : ""}${button("archived", item.archived ? "Restore" : "Archive", !item.archived, !!item.archived)}</div>`;
+    `<button class="small-button" type="button" data-state="${key}" data-id="${esc(item.id)}" data-kind="${kind}" data-value="${value}" aria-pressed="${pressed}"${key === "archived" && item.archived ? ' aria-label="Restore from archive" title="Click to restore from archive"' : ""}>${label}</button>`;
+  return `<div class="card-actions">${button("bookmarked", item.bookmarked ? "★ Saved" : "☆ Save", !item.bookmarked, !!item.bookmarked)}${button("watching", item.watching ? "◉ Watching" : "◎ Watch", !item.watching, !!item.watching)}${kind === "event" ? button("joined", item.joined ? "✓ Joined" : "Mark joined", !item.joined, !!item.joined) : ""}${button("archived", item.archived ? "Archived" : "Archive", !item.archived, !!item.archived)}</div>`;
 }
 async function changeItemState(button) {
   state.resultCache.clear();
@@ -1137,7 +1167,7 @@ async function api(url, options = {}) {
 if ("serviceWorker" in navigator)
   window.addEventListener("load", () =>
     navigator.serviceWorker
-      .register("/sw.js?build=2026-10-08-filters-v1", {
+      .register("/sw.js?build=2026-10-08-filter-polish-v1", {
         scope: "/",
         updateViaCache: "none",
       })

@@ -26,7 +26,7 @@ const item = {
   joined: 0,
   archived: 0,
 };
-async function setup({ guest = false, configured = true, slowFilters = false, savedFilters = null, filterData = null, archived = false } = {}) {
+async function setup({ guest = false, configured = true, slowFilters = false, savedFilters = null, filterData = null, archived = false, watching = false, joined = false, bookmarked = false } = {}) {
   const dom = new JSDOM(html, {
     url: "https://event-watch.test/",
     runScripts: "outside-only",
@@ -37,7 +37,7 @@ async function setup({ guest = false, configured = true, slowFilters = false, sa
   if (guest && preferences) window.localStorage.setItem('event-watch-browse', JSON.stringify(preferences));
   if (savedFilters) window.localStorage.setItem('event-watch-applied-filters-v1', JSON.stringify(savedFilters));
   const calls = [];
-  let current = { ...item, archived: Number(archived) };
+  let current = { ...item, archived: Number(archived), watching: Number(watching), joined: Number(joined), bookmarked: Number(bookmarked) };
   window.HTMLDialogElement.prototype.showModal = function () {
     this.open = true;
   };
@@ -388,4 +388,61 @@ test("dark-mode event card contrast is scoped to dark theme", () => {
   const styles = readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
   assert.match(styles, /:root\[data-theme="dark"\] \.result-card\s*\{[^}]*background:\s*#[a-f0-9]{6}/);
   assert.match(styles, /:root\[data-theme="dark"\] \.result-card:hover/);
+});
+
+test("event cards reflect saved states without duplicating the action labels as tags", async () => {
+  const cases = [
+    [{}, null],
+    [{ bookmarked: true }, null],
+    [{ watching: true }, "event-card--watching"],
+    [{ joined: true }, "event-card--joined"],
+    [{ joined: true, watching: true }, "event-card--joined"],
+    [{ archived: true }, "event-card--archived"],
+    [{ archived: true, watching: true, joined: true }, "event-card--archived"],
+  ];
+  for (const [flags, expected] of cases) {
+    const app = await setup(flags);
+    try {
+      const card = app.document.querySelector(".result-card");
+      assert.ok(card);
+      const states = ["event-card--archived", "event-card--joined", "event-card--watching"];
+      assert.deepEqual(states.filter(value => card.classList.contains(value)), expected ? [expected] : []);
+      // State is already legible in the Save/Watching/Joined/Archived buttons.
+      const tags = card.querySelector(".card-tags").textContent;
+      assert.doesNotMatch(tags, /Joined|Archived|Watching|Saved/);
+      if (flags.archived)
+        assert.equal(card.querySelector('[data-state="archived"]').textContent, "Archived");
+      if (flags.joined)
+        assert.match(card.querySelector('[data-state="joined"]').textContent, /Joined/);
+      if (flags.watching)
+        assert.match(card.querySelector('[data-state="watching"]').textContent, /Watching/);
+    } finally {
+      app.close();
+    }
+  }
+});
+
+test("event card highlights update immediately when Watch or Archive is toggled", async () => {
+  const app = await setup();
+  try {
+    app.document.querySelector('.result-card [data-state="watching"]').click();
+    await app.settle();
+    assert.equal(app.document.querySelector(".result-card").classList.contains("event-card--watching"), true);
+    app.document.querySelector('.result-card [data-state="archived"]').click();
+    await app.settle();
+    const archived = app.document.querySelector(".result-card");
+    assert.equal(archived.classList.contains("event-card--archived"), true);
+    assert.equal(archived.classList.contains("event-card--watching"), false);
+    assert.equal(archived.querySelector('[data-state="archived"]').textContent, "Archived");
+  } finally {
+    app.close();
+  }
+});
+
+test("state border and fade rules are scoped to event cards", () => {
+  const styles = readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(styles, /\\.result-card\\.event-card--joined[^}]*border-color:\\s*var\\(--event-joined-border\\)/);
+  assert.match(styles, /\\.result-card\\.event-card--watching[^}]*border-color:\\s*var\\(--event-watching-border\\)/);
+  assert.match(styles, /\\.result-card\\.event-card--archived[^}]*background:/);
+  assert.match(styles, /\\.result-card\\.event-card--archived \\.card-body\\s*\\{[^}]*opacity:/);
 });

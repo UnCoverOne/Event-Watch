@@ -26,7 +26,7 @@ const item = {
   joined: 0,
   archived: 0,
 };
-async function setup({ guest = false, configured = true, slowFilters = false, savedFilters = null } = {}) {
+async function setup({ guest = false, configured = true, slowFilters = false, savedFilters = null, filterData = null, archived = false } = {}) {
   const dom = new JSDOM(html, {
     url: "https://event-watch.test/",
     runScripts: "outside-only",
@@ -37,7 +37,7 @@ async function setup({ guest = false, configured = true, slowFilters = false, sa
   if (guest && preferences) window.localStorage.setItem('event-watch-browse', JSON.stringify(preferences));
   if (savedFilters) window.localStorage.setItem('event-watch-applied-filters-v1', JSON.stringify(savedFilters));
   const calls = [];
-  let current = { ...item };
+  let current = { ...item, archived: Number(archived) };
   window.HTMLDialogElement.prototype.showModal = function () {
     this.open = true;
   };
@@ -59,7 +59,7 @@ async function setup({ guest = false, configured = true, slowFilters = false, sa
     }
     else if (url.startsWith("/api/catalogue/filters?")) {
       if (slowFilters) return new Promise(() => {});
-      data = { country: ["GB"], city: ["London", "Bristol"], store: ["Test Store", "Other Store"], format: ["Constructed", "Draft"], category: ["LOCALS"] };
+      data = filterData || { country: ["GB"], city: ["London", "Bristol"], store: ["Test Store", "Other Store"], format: ["Constructed", "Draft"], category: ["LOCALS"] };
     }
     else if (url.startsWith("/api/catalogue/sources?")) data = { sources: [] };
     else if (url.startsWith("/api/catalogue/events?"))
@@ -318,4 +318,74 @@ test("previously selected filters are restored for the right account, view and k
   } finally {
     app.close();
   }
+});
+
+test("filter choices deduplicate Constructed and display formatted multi-word names", async () => {
+  const app = await setup({
+    filterData: {
+      country: ["GB"], city: ["London"], store: ["Test Store"],
+      format: ["Constructed", "CONSTRUCTED", "TWIN_SUNS", "Twin Suns"],
+      category: ["LOCALS", "WEEKLY_EVENT", "Weekly Event"],
+    },
+  });
+  try {
+    app.document.querySelector('[data-filter-open=format]').click();
+    const names = [...app.document.querySelectorAll('#filterOptionList .filter-option span')]
+      .map(el => el.textContent);
+    assert.deepEqual(names, ["Constructed", "Twin Suns"]);
+    app.document.querySelector('#filterOptionList input[value="TWIN_SUNS"]').click();
+    app.document.querySelector("#applyFilterChoice").click();
+    await app.settle();
+    assert.equal(app.document.querySelector('[data-filter-summary=format]').textContent, "Twin Suns");
+    app.document.querySelector('[data-filter-open=category]').click();
+    const types = [...app.document.querySelectorAll('#filterOptionList .filter-option span')]
+      .map(el => el.textContent);
+    assert.deepEqual(types, ["Locals", "Weekly Event"]);
+    app.document.querySelector("#closeFilterDialog").click();
+  } finally {
+    app.close();
+  }
+});
+
+test("saved format variations display as one selected choice", async () => {
+  const app = await setup({
+    savedFilters: { "u:browse:event": "format=CONSTRUCTED&format=Constructed" },
+    filterData: { country: ["GB"], city: [], store: [], format: ["Constructed", "CONSTRUCTED"], category: [] },
+  });
+  try {
+    assert.equal(app.document.querySelector('[data-filter-summary=format]').textContent, "Constructed");
+    app.document.querySelector('[data-filter-open=format]').click();
+    const options = [...app.document.querySelectorAll('#filterOptionList input[type=checkbox]')];
+    assert.equal(options.length, 1);
+    assert.equal(options[0].checked, true);
+  } finally {
+    app.close();
+  }
+});
+
+test("archived items display Archived on card and detail buttons, but still support restoring", async () => {
+  const app = await setup({ archived: true });
+  try {
+    const cardButton = app.document.querySelector('.result-card [data-state="archived"]');
+    assert.equal(cardButton.textContent, "Archived");
+    assert.equal(cardButton.getAttribute("aria-label"), "Restore from archive");
+    assert.equal(cardButton.dataset.value, "false");
+    app.document.querySelector(".card-title a").click();
+    await app.settle();
+    const detailButton = app.document.querySelector('#detailView [data-state="archived"]');
+    assert.equal(detailButton.textContent, "Archived");
+    detailButton.click();
+    await app.settle();
+    assert.equal(app.document.querySelector('#detailView [data-state="archived"]').textContent, "Archive");
+    const request = app.calls.filter(([url]) => url === '/api/catalogue/event/e1/state').at(-1);
+    assert.equal(JSON.parse(request[1].body).archived, false);
+  } finally {
+    app.close();
+  }
+});
+
+test("dark-mode event card contrast is scoped to dark theme", () => {
+  const styles = readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(styles, /:root\[data-theme="dark"\] \.result-card\s*\{[^}]*background:\s*#[a-f0-9]{6}/);
+  assert.match(styles, /:root\[data-theme="dark"\] \.result-card:hover/);
 });

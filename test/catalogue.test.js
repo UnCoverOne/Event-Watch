@@ -207,6 +207,33 @@ test("guest browsing, combined filters, pagination and literal search", async ()
   );
   db.close();
 });
+
+test("multiple City, Store and source facets filter scoped catalogue results", async () => {
+  const { env, db, request } = await fixture();
+  const ids = [];
+  for (const n of [501, 502, 503])
+    ids.push(await saveRecord(env, "event", uvsEvent(raw(n))));
+  const update = db.prepare("UPDATE events SET city = ?, host_lgs = ?, country = ?, price_minor = ? WHERE id = ?");
+  update.run("London", "Test Games", "GB", 0, ids[0]);
+  update.run("Bristol", "Other Games", "GB", 1000, ids[1]);
+  update.run("Manchester", "Third Games", "GB", 0, ids[2]);
+  let data = await request("/api/catalogue/events?city=London&city=Bristol&store=Test+Games&store=Other+Games");
+  assert.equal(data.total, 2);
+  assert.deepEqual(new Set(data.items.map(item => item.city)), new Set(["London", "Bristol"]));
+  data = await request("/api/catalogue/events?store=Other+Games&price=free&price=paid");
+  assert.equal(data.total, 1);
+  assert.equal(data.items[0].city, "Bristol");
+  data = await request("/api/catalogue/events?source=play&source=uvs");
+  assert.equal(data.total, 3);
+  data = await request("/api/catalogue/events?city=Unknown");
+  assert.equal(data.total, 0);
+  const filters = await request("/api/catalogue/filters?view=browse&kind=event");
+  assert.deepEqual(filters.city, ["Bristol", "London", "Manchester"]);
+  assert.ok(filters.store.includes("Test Games"));
+  assert.ok(filters.store.includes("Other Games"));
+  db.close();
+});
+
 test("Collection combines saved states, hides archived and past events by default, and sorts soonest", async () => {
   const { env, db, request } = await fixture();
 

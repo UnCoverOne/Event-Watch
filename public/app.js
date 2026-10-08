@@ -15,6 +15,10 @@ const state = {
   pages: 0,
   request: 0,
   detail: null,
+  selectedFilters: {},
+  filterOptions: {},
+  activeFilter: null,
+  pendingFilter: new Set(),
 };
 const INTERVALS = [5, 10, 15, 30, 60, 180, 360, 720, 1440];
 const LABELS = {
@@ -33,17 +37,25 @@ const SOURCE = {
   play: "Play Riftbound",
   other: "Other website",
 };
-const FILTERS = [
-  "source",
-  "country",
-  "format",
-  "category",
-  "status",
-  "price",
-  "from",
-  "to",
-  "when",
-];
+const MULTI_FILTERS = ["source", "country", "city", "store", "format", "category", "status", "price"];
+const FILTERS = [...MULTI_FILTERS, "from", "to", "when"];
+const FILTER_STORAGE_KEY = "event-watch-applied-filters-v1";
+const FILTER_LABELS = {
+  source: "Source", country: "Country", city: "City", store: "Store",
+  format: "Format", category: "Event type", status: "Availability",
+  price: "Entry fee", when: "Time",
+};
+const FILTER_EMPTY = {
+  source: "All sources", country: "All countries", city: "All cities",
+  store: "All stores", format: "All formats", category: "All types",
+  status: "Any availability", price: "Any price", when: "Upcoming",
+};
+const STATIC_FILTER_OPTIONS = {
+  status: [["AVAILABLE", "Available"], ["NOT_OPEN", "Not open yet"], ["FULL", "Full"], ["CLOSED", "Closed"], ["UNKNOWN", "Unknown"]],
+  price: [["free", "Free"], ["paid", "Paid"]],
+  when: [["upcoming", "Upcoming"], ["all", "Include past events"]],
+};
+
 let toastTimer, searchTimer;
 
 function closeProfileMenu(restoreFocus = false) {
@@ -92,10 +104,7 @@ $("navigation").addEventListener("click", (event) => {
 $("kindTabs").addEventListener("click", (event) => {
   const button = event.target.closest("[data-kind]");
   if (!button) return;
-  const url = new URL(location.href);
-  url.searchParams.set("kind", button.dataset.kind);
-  url.searchParams.delete("page");
-  navigate(url);
+  navigate(new URL(`/?view=${state.view}&kind=${button.dataset.kind}`, location.origin));
 });
 $("collectionFilters").addEventListener("click", (event) => {
   const button = event.target.closest("[data-collection-filter]");
@@ -112,6 +121,7 @@ $("collectionFilters").addEventListener("click", (event) => {
       .join(","),
   );
   url.searchParams.delete("page");
+  persistFilterUrl(url);
   navigate(url);
 });
 $("searchForm").addEventListener("submit", (event) => {
@@ -123,6 +133,29 @@ $("searchInput").addEventListener("input", () => {
   searchTimer = setTimeout(applyFilters, 350);
 });
 $("filters").addEventListener("change", applyFilters);
+$("filters").addEventListener("click", event => {
+  const control = event.target.closest("[data-filter-open]");
+  if (control) openFilterDialog(control.dataset.filterOpen);
+});
+$("closeFilterDialog").addEventListener("click", closeFilterDialog);
+$("applyFilterChoice").addEventListener("click", () => {
+  const key = state.activeFilter;
+  if (!key) return;
+  if (key === "when") {
+    $(key + "Filter").value = [...state.pendingFilter][0] || "upcoming";
+  } else {
+    state.selectedFilters[key] = [...state.pendingFilter];
+    $(key + "Filter").value = state.selectedFilters[key][0] || "";
+  }
+  renderFilterButtons();
+  closeFilterDialog();
+  applyFilters();
+});
+$("clearFilterChoice").addEventListener("click", () => {
+  state.pendingFilter.clear();
+  renderFilterChoices();
+});
+$("filterOptionSearch").addEventListener("input", filterDialogOptions);
 $("sortSelect").addEventListener("change", applyFilters);
 $("filterToggle").addEventListener("click", () => {
   const expanded = $("filterToggle").getAttribute("aria-expanded") !== "true";
@@ -309,7 +342,7 @@ async function loadPreferences() {
 }
 function scopeParams() {
   const p = state.preferences;
-  return new URLSearchParams(p ? { sources: p.sources.join(','), region: p.country, city: p.city || '' } : {});
+  return new URLSearchParams(p ? { sources: p.sources.join(','), region: p.country, scope_city: p.city || '' } : {});
 }
 function showSourceSetup() {
   state.editingSources = true;
@@ -363,7 +396,9 @@ function navigate(url) {
   route();
 }
 async function route() {
-  const params = new URL(location.href).searchParams;
+  const routeUrl = new URL(location.href);
+  restoreSavedFilters(routeUrl);
+  const params = routeUrl.searchParams;
   const requestedView = params.get("view") || "browse";
   if (LEGACY_COLLECTION_VIEWS[requestedView]) {
     const url = new URL(location.href);
@@ -455,31 +490,31 @@ async function route() {
   $("sortSelect").options[1].textContent =
     state.kind === "event" ? "Latest first" : "Name Z–A";
   $("searchInput").value = params.get("q") || "";
+  state.selectedFilters = {};
   for (const key of FILTERS) {
-    const el = $(`${key}Filter`),
-      value = params.get(key) || (key === "when" ? "upcoming" : "");
-    if (
-      el.tagName === "SELECT" &&
-      value &&
-      ![...el.options].some((o) => o.value === value)
-    )
-      el.add(new Option(pretty(value), value));
-    el.value = value;
+    const el = $(`${key}Filter`);
+    if (MULTI_FILTERS.includes(key)) {
+      state.selectedFilters[key] = [...new Set(params.getAll(key).filter(Boolean))];
+      el.value = state.selectedFilters[key][0] || "";
+    } else el.value = params.get(key) || (key === "when" ? "upcoming" : "");
   }
+  state.filterOptions.source = (state.view === "browse"
+    ? state.preferences?.sources || []
+    : Object.keys(SOURCE)).map(id => [id, SOURCE[id] || id]);
+  state.filterOptions.country = state.preferences?.country && state.preferences.country !== "*"
+    ? [[state.preferences.country, countryName(state.preferences.country)]] : [];
+  renderFilterButtons();
   $("sortSelect").value =
     state.view === "collection" ? "date" : params.get("sort") || "date";
   $("browseScope").classList.toggle("hidden", state.view !== "browse");
   if (state.view === "browse") {
     const pref = state.preferences;
     $("browseScope").textContent = `${pref.sources.map(id => SOURCE[id] || id).join(" + ")} · ${pref.country === '*' ? 'Worldwide' : countryName(pref.country)}${pref.city ? ` · ${pref.city}` : ''}`;
-    $("sourceFilter").replaceChildren(new Option("All my sources", ""), ...pref.sources.map(id => new Option(SOURCE[id], id)));
-    $("sourceFilter").value = params.get("source") || "";
     loadFilterOptions();
     loadSourceStatus();
   } else {
     $("sourceStatus").textContent = "";
-    $("sourceFilter").replaceChildren(new Option("All saved sources", ""), ...Object.entries(SOURCE).map(([id, name]) => new Option(name, id)));
-    $("sourceFilter").value = params.get("source") || "";
+    loadFilterOptions();
   }
   await loadResults();
 }
@@ -496,6 +531,113 @@ function collectionFilters(params = new URL(location.href).searchParams) {
     ),
   ];
 }
+function storageSlot(view = state.view, kind = state.kind) {
+  return `${state.user?.id || "guest"}:${view}:${kind}`;
+}
+function allSavedFilters() {
+  try { return JSON.parse(localStorage.getItem(FILTER_STORAGE_KEY) || "{}") || {}; }
+  catch { return {}; }
+}
+function persistFilterUrl(url) {
+  const stored = allSavedFilters();
+  const params = new URLSearchParams(url.search);
+  const selected = new URLSearchParams();
+  for (const [key, value] of params) {
+    if (["q", ...FILTERS, "sort", "collection"].includes(key)) selected.append(key, value);
+  }
+  stored[storageSlot(url.searchParams.get("view") || state.view, url.searchParams.get("kind") || state.kind)] = selected.toString();
+  try { localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(stored)); } catch {}
+}
+function restoreSavedFilters(url) {
+  const params = url.searchParams;
+  if (params.has("id") || params.has("page") ||
+      ["q", ...FILTERS, "sort", "collection"].some(key => params.has(key))) return;
+  const stored = allSavedFilters();
+  const kind = ["store", "lgs"].includes(params.get("kind")) ? "store" : "event";
+  const view = params.get("view") === "collection" ? "collection" : "browse";
+  const value = stored[storageSlot(view, kind)];
+  if (!value) return;
+  for (const [key, choice] of new URLSearchParams(value)) params.append(key, choice);
+  history.replaceState({}, "", url.pathname + url.search);
+}
+function filterChoiceLabel(key, value) {
+  const matched = (state.filterOptions[key] || STATIC_FILTER_OPTIONS[key] || []).find(([id]) => id === value);
+  return matched?.[1] || (key === "country" ? countryName(value) : SOURCE[value] || pretty(value));
+}
+function renderFilterButtons() {
+  for (const key of Object.keys(FILTER_LABELS)) {
+    const values = key === "when"
+      ? [$(key + "Filter").value || "upcoming"]
+      : (state.selectedFilters[key] || []);
+    const label = values.length === 0 ? FILTER_EMPTY[key]
+      : values.length === 1 ? filterChoiceLabel(key, values[0])
+      : `${values.length} selected`;
+    const summary = document.querySelector(`[data-filter-summary="${key}"]`);
+    summary.textContent = label;
+    summary.parentElement.classList.toggle("has-filter", values.length > 0 && !(key === "when" && values[0] === "upcoming"));
+    summary.parentElement.title = values.length > 1 ? values.map(value => filterChoiceLabel(key, value)).join(", ") : label;
+  }
+}
+function openFilterDialog(key) {
+  if (!FILTER_LABELS[key]) return;
+  state.activeFilter = key;
+  state.pendingFilter = new Set(key === "when"
+    ? [$(key + "Filter").value || "upcoming"] : (state.selectedFilters[key] || []));
+  $("filterDialogTitle").textContent = FILTER_LABELS[key];
+  $("filterDialogHint").textContent = key === "when"
+    ? "Choose one option." : "Select one or more options, then apply.";
+  $("filterOptionSearch").value = "";
+  renderFilterChoices();
+  $("filterDialog").showModal();
+  $("filterOptionSearch").focus();
+}
+function closeFilterDialog() {
+  $("filterDialog").close();
+  document.querySelector(`[data-filter-open="${state.activeFilter}"]`)?.focus();
+}
+function renderFilterChoices() {
+  const key = state.activeFilter;
+  const list = $("filterOptionList");
+  list.replaceChildren();
+  const known = state.filterOptions[key] || STATIC_FILTER_OPTIONS[key] || [];
+  const options = [...known];
+  for (const value of state.pendingFilter) {
+    if (!options.some(([id]) => id === value)) options.push([value, filterChoiceLabel(key, value)]);
+  }
+  const single = key === "when";
+  for (const [value, title] of options) {
+    const label = document.createElement("label");
+    label.className = "filter-option";
+    const input = document.createElement("input");
+    input.type = single ? "radio" : "checkbox";
+    input.name = "filter-choice";
+    input.value = value;
+    input.checked = state.pendingFilter.has(value);
+    input.addEventListener("change", () => {
+      if (single) state.pendingFilter.clear();
+      if (input.checked) state.pendingFilter.add(value);
+      else state.pendingFilter.delete(value);
+      if (single) renderFilterChoices();
+    });
+    const text = document.createElement("span");
+    text.textContent = title;
+    label.append(input, text);
+    list.append(label);
+  }
+  if (!options.length) {
+    const p = document.createElement("p");
+    p.className = "hint";
+    p.textContent = "No options indexed here yet.";
+    list.append(p);
+  }
+  filterDialogOptions();
+}
+function filterDialogOptions() {
+  const term = $("filterOptionSearch").value.trim().toLocaleLowerCase();
+  for (const option of $("filterOptionList").querySelectorAll(".filter-option")) {
+    option.hidden = !option.textContent.toLocaleLowerCase().includes(term);
+  }
+}
 function applyFilters() {
   const url = new URL(location.href);
   url.pathname = "/";
@@ -503,32 +645,29 @@ function applyFilters() {
   url.searchParams.set("view", state.view);
   url.searchParams.set("kind", state.kind);
   if (state.view === "collection")
-    url.searchParams.set(
-      "collection",
-      collectionFilters().join(","),
-    );
+    url.searchParams.set("collection", collectionFilters().join(","));
   const data = new FormData($("searchForm"));
-  for (const [key, value] of data)
-    if (
-      value &&
-      (state.kind === "event" ||
-        ![
-          "format",
-          "category",
-          "status",
-          "price",
-          "from",
-          "to",
-          "when",
-        ].includes(key))
-    )
+  for (const [key, value] of data) {
+    if (MULTI_FILTERS.includes(key)) continue;
+    if (value && (state.kind === "event" || !["format", "category", "status", "price", "from", "to", "when"].includes(key)))
       url.searchParams.set(key, value);
-  if (state.view !== "collection")
-    url.searchParams.set("sort", $("sortSelect").value);
+  }
+  for (const key of MULTI_FILTERS) {
+    if (state.kind !== "event" && ["store", "format", "category", "status", "price"].includes(key)) continue;
+    const chosen = state.selectedFilters[key] || [];
+    const proxy = $(key + "Filter").value;
+    // Honour programmatically populated filter values and older single-choice links.
+    const values = proxy !== (chosen[0] || "") ? (proxy ? [proxy] : []) : chosen;
+    for (const value of values) if (value) url.searchParams.append(key, value);
+  }
+  if (state.view !== "collection") url.searchParams.set("sort", $("sortSelect").value);
+  persistFilterUrl(url);
   navigate(url);
 }
 function resetFilters() {
-  navigate(new URL(`/?view=${state.view}&kind=${state.kind}`, location.origin));
+  const url = new URL(`/?view=${state.view}&kind=${state.kind}`, location.origin);
+  persistFilterUrl(url);
+  navigate(url);
 }
 function changePage(delta) {
   const url = new URL(location.href);
@@ -539,34 +678,21 @@ function changePage(delta) {
 async function loadFilterOptions() {
   try {
     const prefs = state.preferences;
-    if (!prefs?.sources.length) return;
-    const data = await metadata(`/api/catalogue/filters?${scopeParams()}`);
-    if (prefs !== state.preferences || state.editingSources || state.view !== "browse") return;
-    for (const key of ["country", "format", "category"]) {
-      const select = $(`${key}Filter`),
-        value = select.value;
-      select.replaceChildren(
-        new Option(
-          key === "country"
-            ? (prefs.country === '*' ? "All countries" : "My selected country")
-            : key === "format"
-              ? "All formats"
-              : "All types",
-          "",
-        ),
-      );
-      for (const option of data[key] || [])
-        select.add(
-          new Option(
-            key === "country" ? countryName(option) : pretty(option),
-            option,
-          ),
-        );
-      if (value && ![...select.options].some(o => o.value === value)) select.add(new Option(pretty(value), value));
-      if (value) select.value = value;
+    if (state.view === "browse" && !prefs?.sources.length) return;
+    const view = state.view, kind = state.kind;
+    const query = new URLSearchParams(scopeParams());
+    query.set("view", view);
+    query.set("kind", kind);
+    const data = await metadata(`/api/catalogue/filters?${query}`);
+    if (prefs !== state.preferences || state.editingSources || state.view !== view || state.kind !== kind) return;
+    for (const key of ["country", "city", "store", "format", "category"]) {
+      state.filterOptions[key] = (data[key] || []).map(value =>
+        [value, key === "country" ? countryName(value) : value]);
     }
+    renderFilterButtons();
+    if ($("filterDialog").open) renderFilterChoices();
   } catch {
-    /* Filters remain usable while the network is unavailable. */
+    /* Selected values still work when metadata is temporarily unavailable. */
   }
 }
 async function loadSourceStatus() {
@@ -1011,7 +1137,7 @@ async function api(url, options = {}) {
 if ("serviceWorker" in navigator)
   window.addEventListener("load", () =>
     navigator.serviceWorker
-      .register("/sw.js?build=2026-10-07-brand-v1", {
+      .register("/sw.js?build=2026-10-08-filters-v1", {
         scope: "/",
         updateViaCache: "none",
       })

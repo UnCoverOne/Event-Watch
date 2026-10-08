@@ -23,6 +23,17 @@ const KINDS = {
   store: ["lgs_stores", "lgs_subscriptions", "store_id"],
 };
 
+// Each occurrence of a query parameter represents another selected filter value.
+function facetValues(params, key) {
+  return [...new Set(params.getAll(key).map(value => value.trim()).filter(Boolean))].slice(0, 50);
+}
+function addFacet(where, args, field, values) {
+  if (!values.length) return;
+  where.push(`e.${field} COLLATE NOCASE IN (${values.map(() => "?").join(",")})`);
+  args.push(...values);
+}
+
+
 function countryNames(code) {
   if (code === "*") return [];
   const names = [code];
@@ -784,24 +795,28 @@ export async function handleCatalogueApi(request, env) {
       const term = `%${q.replace(/[\\%_]/g, "\\$&")}%`;
       args.push(...Array(kind === "event" ? 4 : 3).fill(term));
     }
-    if (p.get("source")) {
+    const selectedSources = facetValues(p, "source");
+    if (selectedSources.length) {
+      const markers = selectedSources.map(() => "?").join(",");
       where.push(
-        `(e.source = ? OR EXISTS (SELECT 1 FROM catalogue_sources cs WHERE cs.kind = ? AND cs.entity_id = e.id AND cs.source = ?))`,
+        `(e.source IN (${markers}) OR EXISTS (SELECT 1 FROM catalogue_sources cs WHERE cs.kind = ? AND cs.entity_id = e.id AND cs.source IN (${markers})))`,
       );
-      args.push(p.get("source"), kind, p.get("source"));
+      args.push(...selectedSources, kind, ...selectedSources);
     }
-    if (p.get("country")) {
-      where.push("e.country = ?");
-      args.push(p.get("country"));
-    }
+    addFacet(where, args, "country", facetValues(p, "country"));
+    addFacet(where, args, "city", facetValues(p, "city"));
     if (kind === "event") {
-      for (const field of ["format", "category", "status", "store_id"])
-        if (p.get(field)) {
-          where.push(`e.${field} = ?`);
-          args.push(p.get(field));
-        }
-      if (p.get("price") === "free") where.push("e.price_minor = 0");
-      if (p.get("price") === "paid") where.push("e.price_minor > 0");
+      for (const field of ["format", "category", "status"])
+        addFacet(where, args, field, facetValues(p, field));
+      const stores = facetValues(p, "store");
+      if (stores.length) {
+        const markers = stores.map(() => "?").join(",");
+        where.push(`(e.host_lgs COLLATE NOCASE IN (${markers}) OR e.store_id IN (SELECT id FROM lgs_stores WHERE title COLLATE NOCASE IN (${markers})))`);
+        args.push(...stores, ...stores);
+      }
+      const prices = facetValues(p, "price");
+      if (prices.includes("free") !== prices.includes("paid"))
+        where.push(prices.includes("free") ? "e.price_minor = 0" : "e.price_minor > 0");
       for (const [param, operator] of [
         ["from", ">="],
         ["to", "<"],
@@ -872,17 +887,41 @@ export async function handleCatalogueApi(request, env) {
     });
   }
   if (method === "GET" && path === "/api/catalogue/filters") {
-    const scope = await browseScope(env, await currentUser(request, env), url.searchParams);
-    if (!scope?.sources.length) return json({ country: [], format: [], category: [] });
-    const results = {};
-    const constraints = scopeConditions(scope, 'event');
-    for (const field of ["format", "category"]) {
-      const query = `SELECT DISTINCT e.${field} AS value FROM events e WHERE ${constraints.where.join(' AND ')} AND e.${field} IS NOT NULL ORDER BY value`;
-      results[field] = ((await env.DB.prepare(query).bind(...constraints.args).all()).results || []).map(
-        (r) => r.value,
-      );
+    const p = url.searchParams;
+    const view = p.get("view") === "collection" ? "collection" : "browse";
+    const kind = p.get("kind") === "store" ? "store" : "event";
+    const user = await currentUser(request, env);
+    const scope = view === "browse" ? await browseScope(env, user, p) : null;
+    const empty = { country: [], city: [], store: [], format: [], category: [] };
+    if (view === "browse" && !scope?.sources.length) return json(empty);
+    if (view === "collection" && !user) return json(empty);
+    const [table, subscriptions, foreignKey] = KINDS[kind];
+    const constraints = view === "browse"
+      ? scopeConditions(scope, kind)
+      : { where: [`EXISTS (SELECT 1 FROM ${subscriptions} s WHERE s.${foreignKey} = e.id AND s.user_id = ?)`], args: [user.id] };
+    const condition = constraints.where.join(" AND ");
+    const results = { ...empty };
+    for (const field of (kind === "event" ? ["country", "city", "format", "category"] : ["country", "city"])) {
+      const sql = `SELECT DISTINCT TRIM(e.${field}) AS value FROM ${table} e
+        WHERE ${condition} AND e.${field} IS NOT NULL AND TRIM(e.${field}) <> ''
+        ORDER BY value COLLATE NOCASE LIMIT 500`;
+      results[field] = ((await env.DB.prepare(sql).bind(...constraints.args).all()).results || []).map(r => r.value);
     }
-    results.country = scope.country === '*' ? [] : [scope.country];
+    if (kind === "event") {
+      const names = new Set();
+      const queries = [
+        `SELECT DISTINCT TRIM(e.host_lgs) AS value FROM events e
+          WHERE ${condition} AND e.host_lgs IS NOT NULL AND TRIM(e.host_lgs) <> ''
+          ORDER BY value COLLATE NOCASE LIMIT 500`,
+        `SELECT DISTINCT TRIM(st.title) AS value FROM events e JOIN lgs_stores st ON st.id = e.store_id
+          WHERE ${condition} AND st.title IS NOT NULL AND TRIM(st.title) <> ''
+          ORDER BY value COLLATE NOCASE LIMIT 500`,
+      ];
+      for (const sql of queries) {
+        for (const row of (await env.DB.prepare(sql).bind(...constraints.args).all()).results || []) names.add(row.value);
+      }
+      results.store = [...names].sort((a, b) => a.localeCompare(b));
+    }
     return json(results);
   }
   const match = path.match(

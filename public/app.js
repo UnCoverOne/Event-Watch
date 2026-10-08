@@ -843,7 +843,13 @@ function card(item, kind) {
   const sources = [
     ...new Set((item.sources || item.source || "other").split(",")),
   ];
-  return `<article class="result-card panel"><div class="card-body"><div class="card-top"><span class="source-label">${sources.map((s) => esc(SOURCE[s] || s)).join(" + ")}</span>${kind === "event" ? status(item.status) : '<span class="tag">Store</span>'}</div>
+  // Archived takes priority over Joined, which takes priority over Watching.
+  // These are presentation-only classes; all action buttons remain usable.
+  const eventState = kind !== "event" ? ""
+    : item.archived ? " event-card--archived"
+    : item.joined ? " event-card--joined"
+    : item.watching ? " event-card--watching" : "";
+  return `<article class="result-card panel${eventState}"><div class="card-body"><div class="card-top"><span class="source-label">${sources.map((s) => esc(SOURCE[s] || s)).join(" + ")}</span>${kind === "event" ? status(item.status) : '<span class="tag">Store</span>'}</div>
     ${kind === "event" ? `<p class="card-date">${esc(dateTime(item.starts_at || item.event_date, false))}</p>` : ""}
     <h3 class="card-title"><a data-internal href="${detailUrl(kind, item.id)}">${esc(item.title || "Untitled listing")}</a></h3>
     <div class="card-location">${kind === "event" ? `${esc(item.host_lgs || "Venue not listed")}<br>` : ""}${esc([item.city, item.country ? countryName(item.country) : ""].filter(Boolean).join(", ") || item.address || "Location not listed")}</div>
@@ -861,7 +867,7 @@ function card(item, kind) {
             .map((v) => `<span class="tag">${esc(pretty(v))}</span>`)
             .join("")
         : ""
-    }${item.joined ? '<span class="tag saved">Joined · alerts paused</span>' : ""}${item.archived ? '<span class="tag">Archived</span>' : ""}</div></div>${actions(item, kind)}</article>`;
+    }</div></div>${actions(item, kind)}</article>`;
 }
 function actions(item, kind) {
   const button = (key, label, value, pressed = false) =>
@@ -1167,7 +1173,7 @@ async function api(url, options = {}) {
 if ("serviceWorker" in navigator)
   window.addEventListener("load", () =>
     navigator.serviceWorker
-      .register("/sw.js?build=2026-10-08-filter-polish-v1", {
+      .register("/sw.js?build=2026-10-08-event-card-states-v1", {
         scope: "/",
         updateViaCache: "none",
       })

@@ -1232,7 +1232,7 @@ async function api(url, options = {}) {
 if ("serviceWorker" in navigator)
   window.addEventListener("load", () =>
     navigator.serviceWorker
-      .register("/sw.js?build=2026-10-08-compact-cards-v1", {
+      .register("/sw.js?build=2026-10-08-svg-icon-mime-v1", {
         scope: "/",
         updateViaCache: "none",
       })

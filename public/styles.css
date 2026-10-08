@@ -506,6 +506,7 @@ main {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  container-type: inline-size;
   transition: border-color 0.15s;
 }
 /* Separate event/store cards from the near-black canvas in dark mode. */
@@ -732,79 +733,29 @@ main {
   font-size: 11px;
   padding: 7px 9px;
 }
-/* The footer prioritizes Watch; Archive remains accessible in the overflow menu. */
+/* All four event actions share one size and the same neutral/selected styling. */
 .card-actions--event {
-  align-items: center;
-  flex-wrap: nowrap;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
 }
 .card-actions--event > .small-button {
-  white-space: nowrap;
-  min-width: 0;
-  flex: 0 1 auto;
-}
-.card-actions--event .card-watch {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-text);
-  font-weight: 700;
-}
-.card-actions--event .card-watch[aria-pressed="true"] {
-  background: color-mix(in srgb, var(--accent) 24%, var(--surface-2));
-  border-color: var(--accent-ink);
-  color: var(--accent-ink);
-}
-.card-more {
-  position: relative;
-  flex: 0 0 auto;
-  margin-left: auto;
-}
-.card-more > summary {
-  display: grid;
-  place-items: center;
-  list-style: none;
-  width: 33px;
-  height: 33px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface-2);
-  color: var(--muted);
-  cursor: pointer;
-}
-.card-more > summary::-webkit-details-marker { display: none; }
-.card-more > summary:hover,
-.card-more[open] > summary { border-color: var(--accent-ink); color: var(--text); }
-.card-more > summary:focus-visible {
-  outline: 2px solid var(--accent-ink);
-  outline-offset: 2px;
-}
-.card-more-menu {
-  position: absolute;
-  z-index: 10;
-  right: 0;
-  bottom: calc(100% + 8px);
-  min-width: 145px;
-  padding: 6px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface-2);
-  box-shadow: 0 8px 24px var(--shadow);
-}
-.card-more-menu .small-button {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 100%;
-  text-align: left;
-  background: transparent;
-  border: 0;
-  padding: 9px 10px;
+  min-width: 0;
+  min-height: 35px;
+  padding: 7px 5px;
+  font-size: 11px;
+  line-height: 1.25;
+  text-align: center;
 }
-.card-more-menu .small-button:hover,
-.card-more-menu .small-button:focus-visible { background: var(--surface); }
-.result-card:has(.card-more[open]) { position: relative; z-index: 2; }
-@media (max-width: 390px) {
-  .card-actions--event { gap: 4px; }
-  .card-actions--event > .small-button { padding: 7px 6px; font-size: 10px; }
-  .card-more > summary { width: 30px; height: 31px; }
+/* Two equal columns when the event card itself is too narrow for four labels. */
+@container (max-width: 360px) {
+  .card-actions--event {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 .pagination {
   display: flex;

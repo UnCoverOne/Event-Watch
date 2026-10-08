@@ -183,7 +183,7 @@ test('new visitors choose sources and location before any catalogue requests', a
       const query = app.calls.find(([url]) => url.startsWith('/api/catalogue/events?'))[0];
       assert.match(query, /sources=uvs/);
       assert.match(query, /region=RO/);
-      assert.equal(new URL(query, 'https://test').searchParams.get('city'), 'București');
+      assert.equal(new URL(query, 'https://test').searchParams.get('scope_city'), 'București');
       assert.equal(app.calls.some(([url, opts]) => url === '/api/catalogue/preferences' && opts.method === 'PUT'), !guest);
     } finally { app.close(); }
   }

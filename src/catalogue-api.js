@@ -362,7 +362,8 @@ async function refreshPlayRegion(env, scope, request) {
   let scanned = 0;
   let inferred = 0;
   let pages = 0;
-  let complete = true;
+  // Mark partial coverage when more anchors exist than the per-request budget.
+  let complete = anchors.length <= 2;
   const at = nowIso();
 
   for (const anchor of anchors.slice(0, 2)) {

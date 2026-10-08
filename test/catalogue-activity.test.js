@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import worker from "../src/index.js";
+import { shouldRunCatalogueSync } from "../src/index.js";
+import { readFileSync } from "node:fs";
 import {
   catalogueBrowseActive,
   isCatalogueBrowseRequest,
@@ -32,28 +33,11 @@ test("catalogue browsing activity uses cache rather than D1", async () => {
   );
 });
 
-test("idle non-watch cron skips D1 catalogue work", async () => {
-  const prior = globalThis.caches;
-  globalThis.caches = { default: new MemoryCache() };
-  try {
-    let prepares = 0;
-    const env = {
-      DB: {
-        prepare() {
-          prepares++;
-          throw new Error("D1 should not be touched while catalogue browsing is idle.");
-        },
-      },
-    };
-    let pending;
-    worker.scheduled(
-      { scheduledTime: Date.parse("2026-10-07T12:01:00Z") },
-      env,
-      { waitUntil(promise) { pending = promise; } },
-    );
-    await pending;
-    assert.equal(prepares, 0);
-  } finally {
-    globalThis.caches = prior;
-  }
+test("catalogue refresh schedule is fixed and independent of visitor activity", () => {
+  assert.equal(shouldRunCatalogueSync(Date.parse("2026-10-07T12:00:00Z")), true);
+  assert.equal(shouldRunCatalogueSync(Date.parse("2026-10-07T12:30:00Z")), true);
+  assert.equal(shouldRunCatalogueSync(Date.parse("2026-10-07T12:05:00Z")), false);
+  assert.equal(shouldRunCatalogueSync(Date.parse("2026-10-07T12:55:00Z")), false);
+  const config = readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8");
+  assert.match(config, /"crons":\s*\["\*\/5 \* \* \* \*"\]/);
 });

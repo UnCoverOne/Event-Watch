@@ -93,11 +93,14 @@ async function knownScopeLocations(env, scope) {
   const rows =
     (
       await env.DB.prepare(
-        `SELECT city, latitude, longitude FROM events
-         WHERE country IN (${marks})
+        `SELECT city, AVG(latitude) AS latitude, AVG(longitude) AS longitude FROM events
+         WHERE country IN (${marks}) AND city IS NOT NULL AND city <> ''
+         GROUP BY city
          UNION ALL
-         SELECT city, latitude, longitude FROM lgs_stores
-         WHERE country IN (${marks})`,
+         SELECT city, AVG(latitude) AS latitude, AVG(longitude) AS longitude FROM lgs_stores
+         WHERE country IN (${marks}) AND city IS NOT NULL AND city <> ''
+         GROUP BY city
+         LIMIT 160`,
       )
         .bind(...countries, ...countries)
         .all()
@@ -109,6 +112,7 @@ async function knownScopeLocations(env, scope) {
     const key = placeKey(row.city);
     if (key && !cities.has(key)) cities.set(key, row.city);
     if (
+      row.latitude != null && row.longitude != null &&
       Number.isFinite(Number(row.latitude)) &&
       Number.isFinite(Number(row.longitude))
     )
@@ -189,7 +193,7 @@ async function reconcileStoreDuplicates(env, scope) {
          FROM lgs_stores e
          WHERE e.country IN (${marks})
          ORDER BY e.title COLLATE NOCASE, e.id
-         LIMIT 500`,
+         LIMIT 75`,
       )
         .bind(...countries)
         .all()
@@ -358,14 +362,15 @@ async function refreshPlayRegion(env, scope, request) {
   let scanned = 0;
   let inferred = 0;
   let pages = 0;
-  let complete = true;
+  // Mark partial coverage when more anchors exist than the per-request budget.
+  let complete = anchors.length <= 2;
   const at = nowIso();
 
-  for (const anchor of anchors) {
+  for (const anchor of anchors.slice(0, 2)) {
     let after = null;
     let anchorComplete = false;
 
-    for (let anchorPage = 0; anchorPage < 20; anchorPage++) {
+    for (let anchorPage = 0; anchorPage < 2; anchorPage++) {
       const data = await playQuery("CompeteTournamentSearch", {
         sport: "rb",
         filter: { rb: { coords: anchor, distanceMeters } },
@@ -430,56 +435,12 @@ async function refreshPlayRegion(env, scope, request) {
     count: imported,
     scanned,
     inferred,
-    anchors: anchors.length,
+    anchors: Math.min(anchors.length, 2),
     pages,
     complete,
     regional: true,
     broadFallback,
   };
-}
-
-const PLAY_BROWSE_REFRESH_SECONDS = 10 * 60;
-function playBrowseRefreshCache() {
-  return globalThis.caches?.default || null;
-}
-function playBrowseRefreshKey(scope) {
-  const country = encodeURIComponent(scope.country || "*");
-  const city = encodeURIComponent(placeKey(scope.city || ""));
-  return new Request(
-    `https://event-watch.internal/play-browse-refresh/${country}/${city}`,
-  );
-}
-async function refreshPlayBrowseIfDue(env, scope, request) {
-  if (!scope.sources.includes("play")) return null;
-  const cache = playBrowseRefreshCache();
-  if (!cache) return null;
-  const key = playBrowseRefreshKey(scope);
-  if (await cache.match(key)) return null;
-
-  let result;
-  try {
-    result = await refreshPlayRegion(env, scope, request);
-    if (!result)
-      result = await safeSyncCatalogue(env, {
-        source: "play",
-        force: true,
-        enabled: scope.sources,
-      });
-  } catch (error) {
-    console.error("Automatic Play browse refresh failed", error.message);
-    return null;
-  }
-
-  if (!result?.error)
-    await cache.put(
-      key,
-      new Response("1", {
-        headers: {
-          "cache-control": `public, max-age=${PLAY_BROWSE_REFRESH_SECONDS}`,
-        },
-      }),
-    );
-  return result;
 }
 
 async function scopedUvsStores(env, scope) {
@@ -502,7 +463,7 @@ async function scopedUvsStores(env, scope) {
         `SELECT e.* FROM lgs_stores e
          WHERE ${where.join(" AND ")}
          ORDER BY e.title COLLATE NOCASE
-         LIMIT 50`,
+         LIMIT 6`,
       )
         .bind(...args)
         .all()
@@ -541,7 +502,7 @@ async function refreshUvsRegion(env, scope) {
   // are much cheaper than writing hundreds of unrelated global records.
   for (const store of stores) {
     try {
-      const events = await catalogueStoreEvents(env, store, { refresh: true });
+      const events = await catalogueStoreEvents(env, store, { refresh: true, maxPages: 1, resultLimit: 150 });
       refreshedStores++;
       visibleEvents += events.filter(
         (event) =>
@@ -585,6 +546,16 @@ export async function handleCatalogueApi(request, env) {
     );
     if (!scope?.sources.length)
       return json({ refreshed: [], setup_required: true });
+
+    // Every manual refresh shares one D1-backed global 30-minute cooldown.
+    // This prevents anonymous scope/city variation from bypassing the budget.
+    const now = nowIso();
+    const nextAllowed = new Date(Date.now() + 30 * 60_000).toISOString();
+    const lease = await env.DB.prepare(
+      "UPDATE catalogue_manual_refresh SET next_allowed_at = ? WHERE key = 'global' AND next_allowed_at <= ?"
+    ).bind(nextAllowed, now).run();
+    if (!lease.meta?.changes)
+      return json({ refreshed: [], rate_limited: true, retry_after_seconds: 1800 });
 
     const refreshed = [];
 
@@ -738,7 +709,6 @@ export async function handleCatalogueApi(request, env) {
       const scope = await browseScope(env, user, p);
       if (!scope?.sources.length)
         return json({ items: [], total: 0, page: 1, pages: 0, setup_required: true });
-      await refreshPlayBrowseIfDue(env, scope, request);
       const constraints = scopeConditions(scope, kind);
       where.push(...constraints.where);
       args.push(...constraints.args);
@@ -900,6 +870,19 @@ export async function handleCatalogueApi(request, env) {
     const empty = { country: [], city: [], store: [], format: [], category: [] };
     if (view === "browse" && !scope?.sources.length) return json(empty);
     if (view === "collection" && !user) return json(empty);
+    // Browse facets are identical for all users with the same configured scope.
+    // Cache only public scope-derived metadata, never private collection facets.
+    const facetCache = view === "browse" ? globalThis.caches?.default : null;
+    const facetKey = facetCache ? new Request(
+      "https://event-watch.internal/facets?scope=" +
+        encodeURIComponent(JSON.stringify([kind, [...scope.sources].sort(), scope.country, scope.city]))
+    ) : null;
+    if (facetKey) {
+      try {
+        const cached = await facetCache.match(facetKey);
+        if (cached) return json(await cached.json());
+      } catch (error) { console.warn("Facet cache lookup failed", error.message); }
+    }
     const [table, subscriptions, foreignKey] = KINDS[kind];
     const constraints = view === "browse"
       ? scopeConditions(scope, kind)
@@ -926,6 +909,13 @@ export async function handleCatalogueApi(request, env) {
         for (const row of (await env.DB.prepare(sql).bind(...constraints.args).all()).results || []) names.add(row.value);
       }
       results.store = [...names].sort((a, b) => a.localeCompare(b));
+    }
+    if (facetKey) {
+      try {
+        await facetCache.put(facetKey, Response.json(results, {
+          headers: { "cache-control": "public, max-age=3600" },
+        }));
+      } catch (error) { console.warn("Facet cache store failed", error.message); }
     }
     return json(results);
   }

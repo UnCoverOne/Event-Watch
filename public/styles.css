@@ -170,8 +170,8 @@ p {
   height: 27px;
   flex: 0 0 auto;
   background: var(--accent-ink);
-  -webkit-mask: url("/icons/event-watch-logo.svg?v=3") center / contain no-repeat;
-  mask: url("/icons/event-watch-logo.svg?v=3") center / contain no-repeat;
+  -webkit-mask: url("/icons/event-watch-logo.svg?v=4") center / contain no-repeat;
+  mask: url("/icons/event-watch-logo.svg?v=4") center / contain no-repeat;
 }
 .offline-brand {
   display: inline-flex;

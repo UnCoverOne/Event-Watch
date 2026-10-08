@@ -869,6 +869,19 @@ export async function handleCatalogueApi(request, env) {
     const empty = { country: [], city: [], store: [], format: [], category: [] };
     if (view === "browse" && !scope?.sources.length) return json(empty);
     if (view === "collection" && !user) return json(empty);
+    // Browse facets are identical for all users with the same configured scope.
+    // Cache only public scope-derived metadata, never private collection facets.
+    const facetCache = view === "browse" ? globalThis.caches?.default : null;
+    const facetKey = facetCache ? new Request(
+      "https://event-watch.internal/facets?scope=" +
+        encodeURIComponent(JSON.stringify([kind, [...scope.sources].sort(), scope.country, scope.city]))
+    ) : null;
+    if (facetKey) {
+      try {
+        const cached = await facetCache.match(facetKey);
+        if (cached) return json(await cached.json());
+      } catch (error) { console.warn("Facet cache lookup failed", error.message); }
+    }
     const [table, subscriptions, foreignKey] = KINDS[kind];
     const constraints = view === "browse"
       ? scopeConditions(scope, kind)
@@ -895,6 +908,13 @@ export async function handleCatalogueApi(request, env) {
         for (const row of (await env.DB.prepare(sql).bind(...constraints.args).all()).results || []) names.add(row.value);
       }
       results.store = [...names].sort((a, b) => a.localeCompare(b));
+    }
+    if (facetKey) {
+      try {
+        await facetCache.put(facetKey, Response.json(results, {
+          headers: { "cache-control": "public, max-age=3600" },
+        }));
+      } catch (error) { console.warn("Facet cache store failed", error.message); }
     }
     return json(results);
   }

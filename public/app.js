@@ -168,14 +168,17 @@ $("reloadButton").addEventListener("click", () =>
     const button = $("reloadButton");
     button.disabled = true;
     try {
-      if (state.view === "browse" && state.preferences?.sources.length)
-        await api(`/api/catalogue/refresh?${scopeParams()}`, { method: "POST" });
+      const refreshed = state.view === "browse" && state.preferences?.sources.length
+        ? await api(`/api/catalogue/refresh?${scopeParams()}`, { method: "POST" })
+        : null;
       state.resultCache.clear();
       state.metadataCache.clear();
       await loadResults();
       if (state.view === "browse" && state.preferences?.sources.length)
         await Promise.all([loadSourceStatus(), loadFilterOptions()]);
-      toast("Results refreshed.");
+      toast(refreshed?.rate_limited
+        ? "Refresh on cooldown. Showing latest indexed events."
+        : "Results refreshed.");
     } finally {
       button.disabled = false;
     }
@@ -1212,7 +1215,7 @@ async function api(url, options = {}) {
 if ("serviceWorker" in navigator)
   window.addEventListener("load", () =>
     navigator.serviceWorker
-      .register("/sw.js?build=2026-10-08-equal-buttons-v1", {
+      .register("/sw.js?build=2026-10-08-d1-budget-v1", {
         scope: "/",
         updateViaCache: "none",
       })

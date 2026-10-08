@@ -29,8 +29,13 @@ function facetValues(params, key) {
 }
 function addFacet(where, args, field, values) {
   if (!values.length) return;
-  where.push(`e.${field} COLLATE NOCASE IN (${values.map(() => "?").join(",")})`);
-  args.push(...values);
+  // Feed values may spell a format/type with spaces or underscores. Match both.
+  const column = ["format", "category"].includes(field)
+    ? `REPLACE(e.${field}, '_', ' ')`
+    : `e.${field}`;
+  where.push(`${column} COLLATE NOCASE IN (${values.map(() => "?").join(",")})`);
+  args.push(...values.map(value =>
+    ["format", "category"].includes(field) ? value.replaceAll("_", " ") : value));
 }
 
 

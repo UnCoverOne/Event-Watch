@@ -173,7 +173,7 @@ export async function saveRecord(env, kind, item, at = nowIso()) {
     const candidates =
       (
         await env.DB.prepare(
-          "SELECT * FROM lgs_stores WHERE LOWER(title) = LOWER(?) LIMIT 20",
+          "SELECT * FROM lgs_stores WHERE title = ? COLLATE NOCASE LIMIT 20",
         )
           .bind(item.title)
           .all()
@@ -565,7 +565,7 @@ export async function refreshCatalogueItem(env, kind, item) {
 export async function catalogueStoreEvents(
   env,
   store,
-  { refresh = false } = {},
+  { refresh = false, maxPages = Infinity, resultLimit = null } = {},
 ) {
   if (refresh && store.source === "uvs" && store.source_id) {
     // Get a complete live listing before advancing any watch baseline.
@@ -592,7 +592,7 @@ export async function catalogueStoreEvents(
           .run();
       }
       const next = data.next_page_number;
-      if (next == null) break;
+      if (next == null || page >= maxPages) break;
       if (!Number.isSafeInteger(next) || next <= page || next > 100)
         throw new Error("Incomplete store listing.");
       page = next;
@@ -601,9 +601,9 @@ export async function catalogueStoreEvents(
   return (
     (
       await env.DB.prepare(
-        "SELECT * FROM events WHERE store_id = ? ORDER BY starts_at, id",
+        "SELECT * FROM events WHERE store_id = ? ORDER BY starts_at, id" + (resultLimit ? " LIMIT ?" : ""),
       )
-        .bind(store.id)
+        .bind(...(resultLimit ? [store.id, resultLimit] : [store.id]))
         .all()
     ).results || []
   );

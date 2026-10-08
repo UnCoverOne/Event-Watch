@@ -342,7 +342,7 @@ async function loadPreferences() {
 }
 function scopeParams() {
   const p = state.preferences;
-  return new URLSearchParams(p ? { sources: p.sources.join(','), region: p.country, city: p.city || '' } : {});
+  return new URLSearchParams(p ? { sources: p.sources.join(','), region: p.country, scope_city: p.city || '' } : {});
 }
 function showSourceSetup() {
   state.editingSources = true;

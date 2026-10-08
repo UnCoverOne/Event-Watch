@@ -26,7 +26,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg?v=3" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png?v=3" />
-    <link rel="stylesheet" href="/styles.css?v=1.4" />
+    <link rel="stylesheet" href="/styles.css?v=1.5" />
   </head>
   <body>
     <a class="skip-link" href="#content">Skip to content</a>
@@ -150,60 +150,72 @@
                 </button>
               </div>
               <div id="filters" class="filters hidden">
-                <label
-                  >Source<select id="sourceFilter" name="source">
-                    <option value="">All sources</option>
-                    <option value="uvs">UVS Gaming Network</option>
-                    <option value="play">Play Riftbound</option>
-                    <option value="other">Other links</option>
-                  </select></label
-                >
-                <label
-                  >Country<select id="countryFilter" name="country">
-                    <option value="">All countries</option>
-                  </select></label
-                >
-                <label class="event-filter"
-                  >Format<select id="formatFilter" name="format">
-                    <option value="">All formats</option>
-                  </select></label
-                >
-                <label class="event-filter"
-                  >Event type<select id="categoryFilter" name="category">
-                    <option value="">All types</option>
-                  </select></label
-                >
-                <label class="event-filter"
-                  >Availability<select id="statusFilter" name="status">
-                    <option value="">Any availability</option>
-                    <option value="AVAILABLE">Available</option>
-                    <option value="NOT_OPEN">Not open yet</option>
-                    <option value="FULL">Full</option>
-                    <option value="CLOSED">Closed</option>
-                    <option value="UNKNOWN">Unknown</option>
-                  </select></label
-                >
-                <label class="event-filter"
-                  >Entry fee<select id="priceFilter" name="price">
-                    <option value="">Any price</option>
-                    <option value="free">Free</option>
-                    <option value="paid">Paid</option>
-                  </select></label
-                >
-                <label class="event-filter"
-                  >From<input id="fromFilter" name="from" type="date" /></label
-                ><label class="event-filter"
-                  >Through<input id="toFilter" name="to" type="date"
-                /></label>
-                <label class="event-filter"
-                  >Time<select id="whenFilter" name="when">
-                    <option value="upcoming">Upcoming</option>
-                    <option value="all">Include past events</option>
-                  </select></label
-                >
-                <button id="resetFilters" class="link-button" type="button">
-                  Reset filters
-                </button>
+                <div class="filter-field">
+                  <span id="sourceLabel">Source</span>
+                  <input type="hidden" id="sourceFilter" name="source" value="" />
+                  <button class="filter-select" type="button" data-filter-open="source" aria-haspopup="dialog" aria-label="Choose source" aria-describedby="sourceLabel">
+                    <span data-filter-summary="source">All sources</span><span class="filter-chevron" aria-hidden="true">⌄</span>
+                  </button>
+                </div>
+                <div class="filter-field">
+                  <span id="countryLabel">Country</span>
+                  <input type="hidden" id="countryFilter" name="country" value="" />
+                  <button class="filter-select" type="button" data-filter-open="country" aria-haspopup="dialog" aria-label="Choose country" aria-describedby="countryLabel">
+                    <span data-filter-summary="country">All countries</span><span class="filter-chevron" aria-hidden="true">⌄</span>
+                  </button>
+                </div>
+                <div class="filter-field">
+                  <span id="cityLabel">City</span>
+                  <input type="hidden" id="cityFilter" name="city" value="" />
+                  <button class="filter-select" type="button" data-filter-open="city" aria-haspopup="dialog" aria-label="Choose city" aria-describedby="cityLabel">
+                    <span data-filter-summary="city">All cities</span><span class="filter-chevron" aria-hidden="true">⌄</span>
+                  </button>
+                </div>
+                <div class="filter-field event-filter">
+                  <span id="storeLabel">Store</span>
+                  <input type="hidden" id="storeFilter" name="store" value="" />
+                  <button class="filter-select" type="button" data-filter-open="store" aria-haspopup="dialog" aria-label="Choose store" aria-describedby="storeLabel">
+                    <span data-filter-summary="store">All stores</span><span class="filter-chevron" aria-hidden="true">⌄</span>
+                  </button>
+                </div>
+                <div class="filter-field event-filter">
+                  <span id="formatLabel">Format</span>
+                  <input type="hidden" id="formatFilter" name="format" value="" />
+                  <button class="filter-select" type="button" data-filter-open="format" aria-haspopup="dialog" aria-label="Choose format" aria-describedby="formatLabel">
+                    <span data-filter-summary="format">All formats</span><span class="filter-chevron" aria-hidden="true">⌄</span>
+                  </button>
+                </div>
+                <div class="filter-field event-filter">
+                  <span id="categoryLabel">Event type</span>
+                  <input type="hidden" id="categoryFilter" name="category" value="" />
+                  <button class="filter-select" type="button" data-filter-open="category" aria-haspopup="dialog" aria-label="Choose event type" aria-describedby="categoryLabel">
+                    <span data-filter-summary="category">All types</span><span class="filter-chevron" aria-hidden="true">⌄</span>
+                  </button>
+                </div>
+                <div class="filter-field event-filter">
+                  <span id="statusLabel">Availability</span>
+                  <input type="hidden" id="statusFilter" name="status" value="" />
+                  <button class="filter-select" type="button" data-filter-open="status" aria-haspopup="dialog" aria-label="Choose availability" aria-describedby="statusLabel">
+                    <span data-filter-summary="status">Any availability</span><span class="filter-chevron" aria-hidden="true">⌄</span>
+                  </button>
+                </div>
+                <div class="filter-field event-filter">
+                  <span id="priceLabel">Entry fee</span>
+                  <input type="hidden" id="priceFilter" name="price" value="" />
+                  <button class="filter-select" type="button" data-filter-open="price" aria-haspopup="dialog" aria-label="Choose entry fee" aria-describedby="priceLabel">
+                    <span data-filter-summary="price">Any price</span><span class="filter-chevron" aria-hidden="true">⌄</span>
+                  </button>
+                </div>
+                <div class="filter-field event-filter">
+                  <span id="whenLabel">Time</span>
+                  <input type="hidden" id="whenFilter" name="when" value="upcoming" />
+                  <button class="filter-select" type="button" data-filter-open="when" aria-haspopup="dialog" aria-label="Choose time" aria-describedby="whenLabel">
+                    <span data-filter-summary="when">Upcoming</span><span class="filter-chevron" aria-hidden="true">⌄</span>
+                  </button>
+                </div>
+                <label class="event-filter">From<input id="fromFilter" name="from" type="date" /></label>
+                <label class="event-filter">Through<input id="toFilter" name="to" type="date" /></label>
+                <button id="resetFilters" class="link-button" type="button">Reset filters</button>
               </div>
             </form>
             <div
@@ -345,7 +357,20 @@
       <p id="notificationStatus" class="hint" role="status"></p>
       </div>
     </dialog>
+    <dialog id="filterDialog" class="filter-dialog" aria-labelledby="filterDialogTitle">
+      <div class="settings-heading">
+        <div><p class="filter-eyebrow">Refine results</p><h2 id="filterDialogTitle">Choose options</h2></div>
+        <button id="closeFilterDialog" class="link-button" type="button">Close</button>
+      </div>
+      <p id="filterDialogHint" class="hint"></p>
+      <label class="filter-dialog-search"><span class="sr-only">Find an option</span><input id="filterOptionSearch" type="search" placeholder="Find an option…" autocomplete="off" /></label>
+      <div id="filterOptionList" class="filter-option-list" role="group" aria-label="Filter options"></div>
+      <div class="filter-dialog-actions">
+        <button id="clearFilterChoice" class="small-button" type="button">Clear selection</button>
+        <button id="applyFilterChoice" class="primary" type="button">Apply filters</button>
+      </div>
+    </dialog>
     <div id="toast" class="toast hidden" role="status"></div>
-    <script type="module" src="/app.js?v=1.3"></script>
+    <script type="module" src="/app.js?v=1.5"></script>
   </body>
 </html>

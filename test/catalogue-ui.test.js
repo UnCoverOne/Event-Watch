@@ -26,7 +26,7 @@ const item = {
   joined: 0,
   archived: 0,
 };
-async function setup({ guest = false, configured = true, slowFilters = false } = {}) {
+async function setup({ guest = false, configured = true, slowFilters = false, savedFilters = null } = {}) {
   const dom = new JSDOM(html, {
     url: "https://event-watch.test/",
     runScripts: "outside-only",
@@ -35,6 +35,7 @@ async function setup({ guest = false, configured = true, slowFilters = false } =
   const { window } = dom;
   let preferences = configured ? { sources: ['uvs', 'play'], country: 'GB', city: '' } : null;
   if (guest && preferences) window.localStorage.setItem('event-watch-browse', JSON.stringify(preferences));
+  if (savedFilters) window.localStorage.setItem('event-watch-applied-filters-v1', JSON.stringify(savedFilters));
   const calls = [];
   let current = { ...item };
   window.HTMLDialogElement.prototype.showModal = function () {
@@ -58,7 +59,7 @@ async function setup({ guest = false, configured = true, slowFilters = false } =
     }
     else if (url.startsWith("/api/catalogue/filters?")) {
       if (slowFilters) return new Promise(() => {});
-      data = { country: ["GB"], format: ["Constructed"], category: ["LOCALS"] };
+      data = { country: ["GB"], city: ["London", "Bristol"], store: ["Test Store", "Other Store"], format: ["Constructed", "Draft"], category: ["LOCALS"] };
     }
     else if (url.startsWith("/api/catalogue/sources?")) data = { sources: [] };
     else if (url.startsWith("/api/catalogue/events?"))
@@ -262,4 +263,59 @@ test('theme switch exposes and persists the selected theme without losing its th
     assert.equal(app.document.querySelector('#profileEmail').textContent, 'u@example.test');
     assert.equal(app.document.querySelector('#profileVerification').textContent, 'Verified');
   } finally { app.close(); }
+});
+
+test("bespoke filter dialog supports multi-select City and Store, and restores applied filters", async () => {
+  const app = await setup();
+  try {
+    const cityButton = app.document.querySelector('[data-filter-open=city]');
+    cityButton.click();
+    assert.equal(app.document.querySelector("#filterDialog").open, true);
+    assert.equal(app.document.querySelector("#filterDialogTitle").textContent, "City");
+    assert.equal(app.document.querySelector("#filterOptionList input[type=checkbox]").type, "checkbox");
+    for (const city of ["London", "Bristol"])
+      app.document.querySelector(`#filterOptionList input[value="${city}"]`).click();
+    app.document.querySelector("#applyFilterChoice").click();
+    await app.settle();
+    assert.equal(app.document.querySelector('[data-filter-summary=city]').textContent, "2 selected");
+    app.document.querySelector('[data-filter-open=store]').click();
+    for (const store of ["Test Store", "Other Store"])
+      app.document.querySelector(`#filterOptionList input[value="${store}"]`).click();
+    app.document.querySelector("#applyFilterChoice").click();
+    await app.settle();
+    const request = app.calls.filter(([url]) => url.startsWith("/api/catalogue/events?")).at(-1)[0];
+    const url = new URL(request, "https://event-watch.test");
+    assert.deepEqual(url.searchParams.getAll("city"), ["London", "Bristol"]);
+    assert.deepEqual(url.searchParams.getAll("store"), ["Test Store", "Other Store"]);
+    const saved = JSON.parse(app.window.localStorage.getItem("event-watch-applied-filters-v1"));
+    assert.match(saved["u:browse:event"], /city=London/);
+    assert.match(saved["u:browse:event"], /store=Other\+Store/);
+    app.document.querySelector('[data-view=browse]').click();
+    await app.settle();
+    assert.deepEqual(new URL(app.window.location.href).searchParams.getAll("city"), ["London", "Bristol"]);
+    app.document.querySelector("#resetFilters").click();
+    await app.settle();
+    assert.equal(new URL(app.window.location.href).searchParams.has("city"), false);
+    assert.equal(JSON.parse(app.window.localStorage.getItem("event-watch-applied-filters-v1"))["u:browse:event"], "");
+  } finally {
+    app.close();
+  }
+});
+
+test("previously selected filters are restored for the right account, view and kind", async () => {
+  const savedFilters = {
+    "u:browse:event": "city=London&city=Bristol&store=Test+Store",
+    "u:browse:store": "city=Bristol",
+  };
+  const app = await setup({ savedFilters });
+  try {
+    assert.deepEqual(new URL(app.window.location.href).searchParams.getAll("city"), ["London", "Bristol"]);
+    assert.equal(app.document.querySelector('[data-filter-summary=city]').textContent, "2 selected");
+    app.document.querySelector('[data-kind=store]').click();
+    await app.settle();
+    assert.deepEqual(new URL(app.window.location.href).searchParams.getAll("city"), ["Bristol"]);
+    assert.equal(new URL(app.window.location.href).searchParams.has("store"), false);
+  } finally {
+    app.close();
+  }
 });

@@ -38,7 +38,7 @@ export async function savePreferences(env, user, input) {
 export async function browseScope(env, user, params) {
   if (user) return getPreferences(env, user);
   if (!params.has('sources') || !params.has('region')) return null;
-  return validatePreferences({ sources: params.get('sources').split(',').filter(Boolean), country: params.get('region'), city: params.get('city') });
+  return validatePreferences({ sources: params.get('sources').split(',').filter(Boolean), country: params.get('region'), city: params.get('scope_city') ?? params.get('city') });
 }
 
 export function scopeConditions(scope, kind) {

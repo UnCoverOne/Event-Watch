@@ -11,5 +11,13 @@
   Cache-Control: no-cache
 
 /icons/*
-  Content-Type: image/png
   Cache-Control: public, max-age=3600
+
+/icons/event-watch-logo.svg
+  Content-Type: image/svg+xml
+
+/icons/favicon.svg
+  Content-Type: image/svg+xml
+
+/icons/app-icon.svg
+  Content-Type: image/svg+xml

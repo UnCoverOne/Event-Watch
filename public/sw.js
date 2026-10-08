@@ -7,7 +7,7 @@ const BUILD_ID = (
 const CACHE_PREFIX = 'event-watch-shell-';
 const CACHE_NAME = `${CACHE_PREFIX}${BUILD_ID}`;
 const OFFLINE_URL = '/offline.html';
-const PRECACHE = [OFFLINE_URL, '/icons/icon-192.png?v=3', '/icons/favicon.svg?v=3', '/icons/app-icon.svg?v=3'];
+const PRECACHE = [OFFLINE_URL, '/icons/icon-192.png?v=3', '/icons/favicon.svg?v=4', '/icons/app-icon.svg?v=4'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {

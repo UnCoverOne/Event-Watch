@@ -564,7 +564,7 @@ function restoreSavedFilters(url) {
 // Keep one displayed choice while retaining a query value compatible with both.
 function filterOptionIdentity(key, value) {
   const text = key === "format" || key === "category" ? pretty(value) : String(value || "");
-  return text.normalize("NFKC").trim().replace(/\\s+/g, " ").toLocaleLowerCase();
+  return text.normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase();
 }
 function uniqueFilterValues(key, values) {
   const seen = new Set();
@@ -713,7 +713,7 @@ async function loadFilterOptions() {
       state.filterOptions[key] = (data[key] || []).flatMap(value => {
         const label = key === "country" ? countryName(value)
           : key === "format" || key === "category" ? pretty(value) : value;
-        const identity = label.normalize("NFKC").trim().replace(/\\s+/g, " ").toLocaleLowerCase();
+        const identity = label.normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase();
         if (seen.has(identity)) return [];
         seen.add(identity);
         return [[value, label]];

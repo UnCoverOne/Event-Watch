@@ -512,7 +512,7 @@ test("Refresh results forces selected catalogue sources before returning", async
   db.close();
 });
 
-test("Browse bootstraps missing Play stores and events in the same response", async (t) => {
+test("Browse never imports missing Play stores or events; manual refresh can do so", async (t) => {
   const { db, request } = await fixture();
   db.prepare("UPDATE user_browse_preferences SET config = ? WHERE user_id = 'u'")
     .run(JSON.stringify({ sources: ["play"], country: "RO", city: "București" }));
@@ -565,6 +565,11 @@ test("Browse bootstraps missing Play stores and events in the same response", as
   });
 
   try {
+    const before = await request("/api/catalogue/events");
+    assert.equal(before.total, 0);
+    assert.equal(calls, 0, "Browsing must not access upstream sources or start imports");
+    const refresh = await request("/api/catalogue/refresh", "POST");
+    assert.equal(refresh.refreshed[0].source, "play");
     const events = await request("/api/catalogue/events");
     assert.equal(events.total, 1);
     assert.equal(events.items[0].host_lgs, "RamCards");
@@ -1238,4 +1243,74 @@ test('browse setup is required and account sources and country constrain all bro
   await assert.rejects(request('/api/catalogue/preferences', 'PUT', {sources:['https://unknown.example'], country:'GB'}), e => e.status === 400);
   await assert.rejects(request('/api/catalogue/preferences', 'PUT', {sources:['uvs']}), e => e.status === 400);
   db.close();
+});
+
+test("manual catalogue refresh uses one global durable cooldown", async (t) => {
+  const { db, request } = await fixture();
+  db.prepare("UPDATE user_browse_preferences SET config = ? WHERE user_id = 'u'")
+    .run(JSON.stringify({ sources: ["play"], country: "*", city: "" }));
+  let externalFetches = 0;
+  t.mock.method(globalThis, "fetch", async () => {
+    externalFetches++;
+    return Response.json({ data: { competeTournamentSearch: {
+      edges: [], pageInfo: { hasNextPage: false, endCursor: null },
+    } } });
+  });
+  try {
+    const one = await request("/api/catalogue/refresh", "POST");
+    assert.equal(one.rate_limited, undefined);
+    assert.equal(externalFetches, 1);
+    const two = await request("/api/catalogue/refresh?scope_city=AnotherCity", "POST");
+    assert.equal(two.rate_limited, true);
+    assert.ok(two.retry_after_seconds > 0);
+    assert.equal(externalFetches, 1, "Changing scope must not bypass the cooldown");
+    db.prepare("UPDATE catalogue_manual_refresh SET next_allowed_at = '1970-01-01' WHERE key = 'global'").run();
+    const three = await request("/api/catalogue/refresh", "POST");
+    assert.equal(three.rate_limited, undefined);
+    assert.equal(externalFetches, 2);
+  } finally { db.close(); }
+});
+
+test("store title lookups use the NOCASE expression index", async () => {
+  const { db } = await fixture();
+  const plan = db.prepare("EXPLAIN QUERY PLAN SELECT * FROM lgs_stores WHERE title = ? COLLATE NOCASE LIMIT 20")
+    .all("RamCards");
+  assert.ok(plan.some(row => String(row.detail).includes("idx_stores_title_nocase")));
+  db.close();
+});
+
+test("browse filter facets reuse a scoped shared response cache", async () => {
+  const { env, db, request } = await fixture();
+  await saveRecord(env, "event", uvsEvent(raw()));
+  let facetQueries = 0;
+  const originalPrepare = env.DB.prepare;
+  env.DB.prepare = (sql) => {
+    if (sql.includes("SELECT DISTINCT TRIM(")) facetQueries++;
+    return originalPrepare(sql);
+  };
+  class MemoryCache {
+    rows = new Map();
+    async match(key) { return this.rows.get(key.url)?.clone(); }
+    async put(key, response) { this.rows.set(key.url, response.clone()); }
+  }
+  const oldCaches = globalThis.caches;
+  const cache = new MemoryCache();
+  globalThis.caches = { default: cache };
+  try {
+    const a = await request("/api/catalogue/filters?view=browse&kind=event");
+    assert.ok(a.city.includes("London"));
+    const scannedOnce = facetQueries;
+    assert.ok(scannedOnce > 0);
+    const b = await request("/api/catalogue/filters?view=browse&kind=event");
+    assert.deepEqual(b, a);
+    assert.equal(facetQueries, scannedOnce, "Identical browse facets must not query D1 again");
+    await request("/api/catalogue/filters?view=collection&kind=event");
+    assert.ok(facetQueries > scannedOnce, "Private collection facets must not use public cache");
+    const scannedAfterPrivate = facetQueries;
+    await request("/api/catalogue/filters?view=browse&kind=store");
+    assert.ok(facetQueries > scannedAfterPrivate, "Different kind must use a separate cache key");
+  } finally {
+    globalThis.caches = oldCaches;
+    db.close();
+  }
 });

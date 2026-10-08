@@ -260,6 +260,20 @@ $("content").addEventListener("click", (event) => {
       navigate(new URL(detailUrl("event", data.id), location.origin));
     });
 });
+// Native details gives the overflow menu keyboard operation without a system select.
+document.addEventListener("click", event => {
+  for (const menu of document.querySelectorAll(".card-more[open]"))
+    if (!menu.contains(event.target)) menu.open = false;
+});
+document.addEventListener("keydown", event => {
+  if (event.key !== "Escape") return;
+  const openMenu = document.querySelector(".card-more[open]");
+  if (openMenu) {
+    event.preventDefault();
+    openMenu.open = false;
+    openMenu.querySelector("summary")?.focus();
+  }
+});
 $("content").addEventListener("change", (event) => {
   const el = event.target;
   if (!el.matches("[data-preference]") || !state.detail) return;
@@ -839,40 +853,85 @@ function showEmpty(title, copy, action) {
   $("emptyCopy").textContent = copy;
   $("emptyAction").textContent = action;
 }
+// Decorative icons for event-card facts and statistics, never dynamic SVG input.
+function cardIcon(name) {
+  const paths = {
+    calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4M17 3v4M3 10h18"/>',
+    pin: '<path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/>',
+    ticket: '<path d="M3 8V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v3a4 4 0 0 0 0 8v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3a4 4 0 0 0 0-8Z"/><path d="M13 5v2m0 4v2m0 4v2"/>',
+    users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+    more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+  };
+  return '<svg class="card-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths[name] + '</svg>';
+}
+function cardTitle(item, kind) {
+  const title = String(item.title || "Untitled listing");
+  const venue = String(item.host_lgs || "").trim();
+  // Some feeds append the exact store name to a title already followed by its venue.
+  const separator = title.lastIndexOf(" | ");
+  if (kind === "event" && venue && separator > -1 &&
+      title.slice(separator + 3).trim().toLocaleLowerCase() === venue.toLocaleLowerCase())
+    return title.slice(0, separator);
+  return title;
+}
 function card(item, kind) {
   const sources = [
     ...new Set((item.sources || item.source || "other").split(",")),
   ];
   // Archived takes priority over Joined, which takes priority over Watching.
-  // These are presentation-only classes; all action buttons remain usable.
   const eventState = kind !== "event" ? ""
     : item.archived ? " event-card--archived"
     : item.joined ? " event-card--joined"
     : item.watching ? " event-card--watching" : "";
-  return `<article class="result-card panel${eventState}"><div class="card-body"><div class="card-top"><span class="source-label">${sources.map((s) => esc(SOURCE[s] || s)).join(" + ")}</span>${kind === "event" ? status(item.status) : '<span class="tag">Store</span>'}</div>
-    ${kind === "event" ? `<p class="card-date">${esc(dateTime(item.starts_at || item.event_date, false))}</p>` : ""}
-    <h3 class="card-title"><a data-internal href="${detailUrl(kind, item.id)}">${esc(item.title || "Untitled listing")}</a></h3>
-    <div class="card-location">${kind === "event" ? `${esc(item.host_lgs || "Venue not listed")}<br>` : ""}${esc([item.city, item.country ? countryName(item.country) : ""].filter(Boolean).join(", ") || item.address || "Location not listed")}</div>
-    <div class="card-tags">${
-      kind === "event"
-        ? [
-            item.format,
-            item.category,
-            price(item),
-            item.capacity != null
-              ? `${item.current_players ?? "?"} / ${item.capacity} players`
-              : "",
-          ]
-            .filter(Boolean)
-            .map((v) => `<span class="tag">${esc(pretty(v))}</span>`)
-            .join("")
-        : ""
-    }</div></div>${actions(item, kind)}</article>`;
+  const isEvent = kind === "event";
+  const place = esc([item.city, item.country ? countryName(item.country) : ""]
+    .filter(Boolean).join(", ") || item.address || "Location not listed");
+  const tags = isEvent ? [item.format, item.category].filter(Boolean)
+    .map(value => '<span class="tag">' + esc(pretty(value)) + '</span>').join("") : "";
+  const fee = isEvent ? price(item) : "";
+  const playerCount = isEvent && item.capacity != null
+    ? (item.current_players ?? "?") + " / " + item.capacity : "";
+  const metrics = isEvent && (fee || playerCount)
+    ? '<dl class="card-metrics">' +
+      (fee ? '<div class="card-metric">' + cardIcon("ticket") +
+        '<div><dt>Entry fee</dt><dd>' + esc(fee) + '</dd></div></div>' : "") +
+      (playerCount ? '<div class="card-metric">' + cardIcon("users") +
+        '<div><dt>Players</dt><dd>' + esc(playerCount) + '</dd></div></div>' : "") +
+      '</dl>' : "";
+  return '<article class="result-card panel' + eventState + '"><div class="card-body">' +
+    '<div class="card-top"><span class="source-label">' +
+    sources.map(s => esc(SOURCE[s] || s)).join(" + ") + '</span>' +
+    (isEvent ? status(item.status) : '<span class="tag">Store</span>') + '</div>' +
+    '<h3 class="card-title"><a data-internal href="' + detailUrl(kind, item.id) + '">' +
+    esc(cardTitle(item, kind)) + '</a></h3>' +
+    (isEvent
+      ? '<div class="card-facts"><div class="card-fact">' + cardIcon("calendar") +
+          '<span>' + esc(dateTime(item.starts_at || item.event_date, false)) + '</span></div>' +
+        '<div class="card-fact">' + cardIcon("pin") + '<span>' +
+          '<strong>' + esc(item.host_lgs || "Venue not listed") + '</strong>' +
+          '<span class="card-fact-subline">' + place + '</span></span></div></div>'
+      : '<div class="card-location">' + place + '</div>') +
+    '<div class="card-tags">' + tags + '</div>' + metrics +
+    '</div>' + actions(item, kind, true) + '</article>';
 }
-function actions(item, kind) {
-  const button = (key, label, value, pressed = false) =>
-    `<button class="small-button" type="button" data-state="${key}" data-id="${esc(item.id)}" data-kind="${kind}" data-value="${value}" aria-pressed="${pressed}"${key === "archived" && item.archived ? ' aria-label="Restore from archive" title="Click to restore from archive"' : ""}>${label}</button>`;
-  return `<div class="card-actions">${button("bookmarked", item.bookmarked ? "★ Saved" : "☆ Save", !item.bookmarked, !!item.bookmarked)}${button("watching", item.watching ? "◉ Watching" : "◎ Watch", !item.watching, !!item.watching)}${kind === "event" ? button("joined", item.joined ? "✓ Joined" : "Mark joined", !item.joined, !!item.joined) : ""}${button("archived", item.archived ? "Archived" : "Archive", !item.archived, !!item.archived)}</div>`;
+function actions(item, kind, cardView = false) {
+  const button = (key, label, value, pressed = false, extraClass = "") =>
+    '<button class="small-button' + extraClass + '" type="button" data-state="' + key +
+    '" data-id="' + esc(item.id) + '" data-kind="' + kind + '" data-value="' + value +
+    '" aria-pressed="' + pressed + '"' +
+    (key === "archived" && item.archived ? ' aria-label="Restore from archive" title="Click to restore from archive"' : "") +
+    '>' + label + '</button>';
+  const save = button("bookmarked", item.bookmarked ? "★ Saved" : "☆ Save", !item.bookmarked, !!item.bookmarked);
+  const watch = button("watching", item.watching ? "◉ Watching" : "◎ Watch", !item.watching, !!item.watching,
+    cardView && kind === "event" ? " card-watch" : "");
+  const join = button("joined", item.joined ? "✓ Joined" : (cardView ? "Join" : "Mark joined"), !item.joined, !!item.joined);
+  const archive = button("archived", item.archived ? "Archived" : "Archive", !item.archived, !!item.archived);
+  if (cardView && kind === "event")
+    return '<div class="card-actions card-actions--event">' + save + watch + join +
+      '<details class="card-more" name="card-actions-menu">' +
+        '<summary title="More event actions" aria-label="More event actions">' + cardIcon("more") + '</summary>' +
+        '<div class="card-more-menu">' + archive + '</div></details></div>';
+  return '<div class="card-actions">' + save + watch + (kind === "event" ? join : "") + archive + '</div>';
 }
 async function changeItemState(button) {
   state.resultCache.clear();
@@ -1173,7 +1232,7 @@ async function api(url, options = {}) {
 if ("serviceWorker" in navigator)
   window.addEventListener("load", () =>
     navigator.serviceWorker
-      .register("/sw.js?build=2026-10-08-event-card-states-v1", {
+      .register("/sw.js?build=2026-10-08-compact-cards-v1", {
         scope: "/",
         updateViaCache: "none",
       })

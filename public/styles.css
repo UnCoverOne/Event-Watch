@@ -376,6 +376,90 @@ main {
   border-top: 1px solid var(--line);
   padding-top: 20px;
 }
+/* Bespoke filter controls share the site palette in light and dark mode. */
+.filter-field {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  min-width: 0;
+}
+.filter-select {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--input);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+}
+.filter-select > span:first-child {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.filter-select.has-filter {
+  color: var(--text);
+  border-color: var(--accent-ink);
+}
+.filter-select:hover { border-color: var(--muted); }
+.filter-chevron { color: var(--accent-ink); font-size: 18px; line-height: 1; }
+.filter-dialog { max-width: 520px; }
+.filter-eyebrow {
+  margin: 0 0 2px;
+  color: var(--accent-ink);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+}
+.filter-dialog .hint { margin-top: 0; }
+.filter-dialog-search { margin: 14px 0; }
+.filter-option-list {
+  display: grid;
+  gap: 5px;
+  max-height: min(45vh, 370px);
+  min-height: 58px;
+  overflow-y: auto;
+  padding: 5px 3px;
+}
+.filter-option {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--surface-2);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.filter-option:hover { border-color: var(--muted); }
+.filter-option:has(input:checked) { border-color: var(--accent-ink); }
+.filter-option input {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  margin: 0;
+  accent-color: var(--accent-ink);
+}
+.filter-option[hidden] { display: none; }
+.filter-dialog-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 22px;
+}
 .source-status {
   color: var(--muted);
   font-size: 11px;

@@ -260,20 +260,6 @@ $("content").addEventListener("click", (event) => {
       navigate(new URL(detailUrl("event", data.id), location.origin));
     });
 });
-// Native details gives the overflow menu keyboard operation without a system select.
-document.addEventListener("click", event => {
-  for (const menu of document.querySelectorAll(".card-more[open]"))
-    if (!menu.contains(event.target)) menu.open = false;
-});
-document.addEventListener("keydown", event => {
-  if (event.key !== "Escape") return;
-  const openMenu = document.querySelector(".card-more[open]");
-  if (openMenu) {
-    event.preventDefault();
-    openMenu.open = false;
-    openMenu.querySelector("summary")?.focus();
-  }
-});
 $("content").addEventListener("change", (event) => {
   const el = event.target;
   if (!el.matches("[data-preference]") || !state.detail) return;
@@ -860,7 +846,6 @@ function cardIcon(name) {
     pin: '<path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/>',
     ticket: '<path d="M3 8V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v3a4 4 0 0 0 0 8v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3a4 4 0 0 0 0-8Z"/><path d="M13 5v2m0 4v2m0 4v2"/>',
     users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
-    more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
   };
   return '<svg class="card-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths[name] + '</svg>';
 }
@@ -915,23 +900,18 @@ function card(item, kind) {
     '</div>' + actions(item, kind, true) + '</article>';
 }
 function actions(item, kind, cardView = false) {
-  const button = (key, label, value, pressed = false, extraClass = "") =>
-    '<button class="small-button' + extraClass + '" type="button" data-state="' + key +
+  const button = (key, label, value, pressed = false) =>
+    '<button class="small-button" type="button" data-state="' + key +
     '" data-id="' + esc(item.id) + '" data-kind="' + kind + '" data-value="' + value +
     '" aria-pressed="' + pressed + '"' +
     (key === "archived" && item.archived ? ' aria-label="Restore from archive" title="Click to restore from archive"' : "") +
     '>' + label + '</button>';
   const save = button("bookmarked", item.bookmarked ? "★ Saved" : "☆ Save", !item.bookmarked, !!item.bookmarked);
-  const watch = button("watching", item.watching ? "◉ Watching" : "◎ Watch", !item.watching, !!item.watching,
-    cardView && kind === "event" ? " card-watch" : "");
+  const watch = button("watching", item.watching ? "◉ Watching" : "◎ Watch", !item.watching, !!item.watching);
   const join = button("joined", item.joined ? "✓ Joined" : (cardView ? "Join" : "Mark joined"), !item.joined, !!item.joined);
   const archive = button("archived", item.archived ? "Archived" : "Archive", !item.archived, !!item.archived);
-  if (cardView && kind === "event")
-    return '<div class="card-actions card-actions--event">' + save + watch + join +
-      '<details class="card-more" name="card-actions-menu">' +
-        '<summary title="More event actions" aria-label="More event actions">' + cardIcon("more") + '</summary>' +
-        '<div class="card-more-menu">' + archive + '</div></details></div>';
-  return '<div class="card-actions">' + save + watch + (kind === "event" ? join : "") + archive + '</div>';
+  return '<div class="card-actions' + (cardView && kind === "event" ? " card-actions--event" : "") + '">' +
+    save + watch + (kind === "event" ? join : "") + archive + '</div>';
 }
 async function changeItemState(button) {
   state.resultCache.clear();
@@ -1232,7 +1212,7 @@ async function api(url, options = {}) {
 if ("serviceWorker" in navigator)
   window.addEventListener("load", () =>
     navigator.serviceWorker
-      .register("/sw.js?build=2026-10-08-svg-icon-mime-v1", {
+      .register("/sw.js?build=2026-10-08-equal-buttons-v1", {
         scope: "/",
         updateViaCache: "none",
       })

@@ -489,29 +489,42 @@ test("event facts gracefully omit unpublished price or player counts", async () 
   } finally { app.close(); }
 });
 
-test("event action footer keeps Watch primary and Archive accessible via the overflow menu", async () => {
+test("event action footer displays four matching buttons with no overflow menu", async () => {
   const app = await setup();
   try {
     let card = app.document.querySelector(".result-card");
-    const buttons = [...card.querySelectorAll(".card-actions--event > button")];
-    assert.deepEqual(buttons.map(el => el.dataset.state), ["bookmarked", "watching", "joined"]);
-    assert.equal(card.querySelector(".card-watch").getAttribute("aria-pressed"), "false");
-    const more = card.querySelector(".card-more");
-    assert.ok(more);
-    assert.equal(more.open, false);
-    more.querySelector("summary").click();
-    assert.equal(more.open, true);
-    assert.equal(more.querySelector('[data-state=archived]').textContent, "Archive");
-    app.document.dispatchEvent(new app.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    assert.equal(more.open, false);
-    more.querySelector("summary").click();
-    more.querySelector('[data-state=archived]').click();
+    const actions = card.querySelector(".card-actions--event");
+    const buttons = [...actions.children];
+    assert.equal(buttons.length, 4);
+    assert.deepEqual(buttons.map(el => el.dataset.state),
+      ["bookmarked", "watching", "joined", "archived"]);
+    assert.ok(buttons.every(button => button.tagName === "BUTTON"));
+    assert.ok(buttons.every(button => button.className === "small-button"));
+    assert.deepEqual(buttons.map(button => button.textContent),
+      ["☆ Save", "◎ Watch", "Join", "Archive"]);
+    assert.equal(card.querySelector(".card-more"), null);
+    buttons[1].click();
+    await app.settle();
+    card = app.document.querySelector(".result-card");
+    assert.equal(card.querySelector('[data-state="watching"]').textContent, "◉ Watching");
+    assert.equal(card.classList.contains("event-card--watching"), true);
+    card.querySelector('[data-state="archived"]').click();
     await app.settle();
     card = app.document.querySelector(".result-card");
     assert.equal(card.classList.contains("event-card--archived"), true);
-    assert.equal(card.querySelector(".card-more [data-state=archived]").textContent, "Archived");
+    assert.equal(card.querySelector('[data-state="archived"]').textContent, "Archived");
+    assert.equal(card.querySelector(".card-actions--event").children.length, 4);
     assert.equal(JSON.parse(app.calls.filter(([url]) => url.endsWith("/state")).at(-1)[1].body).archived, true);
   } finally { app.close(); }
+});
+
+test("event action buttons share equal grid sizes, base styles and responsive layout", () => {
+  const styles = readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(styles, /\.card-actions--event\s*\{[^}]*display:\s*grid/);
+  assert.match(styles, /\.card-actions--event\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(styles, /\.card-actions--event > \.small-button\s*\{[^}]*width:\s*100%/);
+  assert.match(styles, /@container \(max-width:\s*360px\)\s*\{\s*\.card-actions--event\s*\{[^}]*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
+  assert.doesNotMatch(styles, /\.card-watch|\.card-more/);
 });
 
 test("long availability messages retain a rightmost dot and titles have no arrow", async () => {

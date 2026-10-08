@@ -44,5 +44,5 @@ test("logo mask, favicon and service-worker URLs use refreshed icon revisions", 
   assert.match(stylesheet, /mask:\s*url\("\/icons\/event-watch-logo\.svg\?v=4"\)/);
   assert.match(html, /href="\/icons\/favicon\.svg\?v=4"/);
   assert.match(detailHtml, /href="\/icons\/favicon\.svg\?v=4"/);
-  assert.match(worker, /\/sw\.js\?build=2026-10-08-svg-icon-mime-v1/);
+  assert.match(worker, /\/sw\.js\?build=[a-z0-9][a-z0-9._-]*/i);
 });

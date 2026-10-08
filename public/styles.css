@@ -12,6 +12,8 @@
   --danger: #ff9999;
   --input: #101215;
   --shadow: rgba(0, 0, 0, 0.2);
+  --event-joined-border: #568c6d;
+  --event-watching-border: #a48a50;
 }
 :root[data-theme="light"] {
   color-scheme: light;
@@ -27,6 +29,8 @@
   --danger: #9d2d2d;
   --input: #efebf2;
   --shadow: rgba(28, 22, 36, 0.08);
+  --event-joined-border: #6c9e7c;
+  --event-watching-border: #ac9258;
 }
 * {
   box-sizing: border-box;
@@ -516,6 +520,30 @@ main {
 :root[data-theme="dark"] .result-card:hover {
   border-color: color-mix(in srgb, var(--accent-ink) 45%, #3b414c);
   box-shadow: 0 9px 24px rgba(0, 0, 0, 0.32);
+}
+/* State is expressed through the card itself, not a repeated status tag.
+   An archived event outranks joined/watching styling. */
+:root .result-card.event-card--joined,
+:root .result-card.event-card--joined:hover {
+  border-color: var(--event-joined-border);
+}
+:root .result-card.event-card--watching,
+:root .result-card.event-card--watching:hover {
+  border-color: var(--event-watching-border);
+}
+:root .result-card.event-card--archived,
+:root .result-card.event-card--archived:hover {
+  background: color-mix(in srgb, var(--surface) 78%, var(--bg));
+  border-color: var(--line);
+  box-shadow: 0 3px 12px var(--shadow);
+}
+:root[data-theme="dark"] .result-card.event-card--archived,
+:root[data-theme="dark"] .result-card.event-card--archived:hover {
+  background: #171a1f;
+  border-color: #343943;
+}
+:root .result-card.event-card--archived .card-body {
+  opacity: 0.74;
 }
 .card-body {
   padding: 20px;

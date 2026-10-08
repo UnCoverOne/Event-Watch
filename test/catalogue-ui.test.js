@@ -26,7 +26,7 @@ const item = {
   joined: 0,
   archived: 0,
 };
-async function setup({ guest = false, configured = true, slowFilters = false, savedFilters = null, filterData = null, archived = false, watching = false, joined = false, bookmarked = false } = {}) {
+async function setup({ guest = false, configured = true, slowFilters = false, savedFilters = null, filterData = null, archived = false, watching = false, joined = false, bookmarked = false, eventOverrides = {} } = {}) {
   const dom = new JSDOM(html, {
     url: "https://event-watch.test/",
     runScripts: "outside-only",
@@ -37,7 +37,7 @@ async function setup({ guest = false, configured = true, slowFilters = false, sa
   if (guest && preferences) window.localStorage.setItem('event-watch-browse', JSON.stringify(preferences));
   if (savedFilters) window.localStorage.setItem('event-watch-applied-filters-v1', JSON.stringify(savedFilters));
   const calls = [];
-  let current = { ...item, archived: Number(archived), watching: Number(watching), joined: Number(joined), bookmarked: Number(bookmarked) };
+  let current = { ...item, archived: Number(archived), watching: Number(watching), joined: Number(joined), bookmarked: Number(bookmarked), ...eventOverrides };
   window.HTMLDialogElement.prototype.showModal = function () {
     this.open = true;
   };
@@ -445,4 +445,87 @@ test("state border and fade rules are scoped to event cards", () => {
   assert.match(styles, /\.result-card\.event-card--watching[^}]*border-color:\s*var\(--event-watching-border\)/);
   assert.match(styles, /\.result-card\.event-card--archived[^}]*background:/);
   assert.match(styles, /\.result-card\.event-card--archived \.card-body\s*\{[^}]*opacity:/);
+});
+
+test("compact event cards separate metadata chips from price and player statistics", async () => {
+  const app = await setup({ eventOverrides: {
+    title: "Radiance Pre-Rift Event | RamCards",
+    host_lgs: "RamCards",
+    format: "LIMITED_SEALED",
+    category: "PRE_RIFT",
+    price_minor: 3000,
+    currency: "EUR",
+    capacity: 16,
+    current_players: 13,
+  } });
+  try {
+    const card = app.document.querySelector(".result-card");
+    assert.equal(card.querySelector(".card-title a").textContent, "Radiance Pre-Rift Event");
+    assert.equal(card.querySelectorAll(".card-fact").length, 2);
+    assert.match(card.querySelector(".card-facts").textContent, /RamCards/);
+    assert.match(card.querySelector(".card-facts").textContent, /London/);
+    assert.deepEqual([...card.querySelectorAll(".card-tags .tag")].map(el => el.textContent),
+      ["Limited Sealed", "Pre Rift"]);
+    const metrics = [...card.querySelectorAll(".card-metric")].map(el =>
+      [el.querySelector("dt").textContent, el.querySelector("dd").textContent]);
+    assert.equal(metrics.length, 2);
+    assert.equal(metrics[0][0], "Entry fee");
+    assert.match(metrics[0][1], /30/);
+    assert.equal(metrics[1][0], "Players");
+    assert.equal(metrics[1][1], "13 / 16");
+    assert.equal(card.querySelector(".card-metrics progress"), null);
+    assert.equal(card.querySelector(".card-metrics [role=progressbar]"), null);
+    assert.equal(card.querySelector(".card-top").lastElementChild.classList.contains("status"), true);
+  } finally { app.close(); }
+});
+
+test("event facts gracefully omit unpublished price or player counts", async () => {
+  const app = await setup();
+  try {
+    const card = app.document.querySelector(".result-card");
+    assert.equal(card.querySelector(".card-metrics"), null);
+    assert.equal(card.querySelector(".card-tags").textContent, "");
+    assert.equal(card.querySelector(".card-facts .card-fact-subline").textContent, "London, United Kingdom");
+  } finally { app.close(); }
+});
+
+test("event action footer keeps Watch primary and Archive accessible via the overflow menu", async () => {
+  const app = await setup();
+  try {
+    let card = app.document.querySelector(".result-card");
+    const buttons = [...card.querySelectorAll(".card-actions--event > button")];
+    assert.deepEqual(buttons.map(el => el.dataset.state), ["bookmarked", "watching", "joined"]);
+    assert.equal(card.querySelector(".card-watch").getAttribute("aria-pressed"), "false");
+    const more = card.querySelector(".card-more");
+    assert.ok(more);
+    assert.equal(more.open, false);
+    more.querySelector("summary").click();
+    assert.equal(more.open, true);
+    assert.equal(more.querySelector('[data-state=archived]').textContent, "Archive");
+    app.document.dispatchEvent(new app.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    assert.equal(more.open, false);
+    more.querySelector("summary").click();
+    more.querySelector('[data-state=archived]').click();
+    await app.settle();
+    card = app.document.querySelector(".result-card");
+    assert.equal(card.classList.contains("event-card--archived"), true);
+    assert.equal(card.querySelector(".card-more [data-state=archived]").textContent, "Archived");
+    assert.equal(JSON.parse(app.calls.filter(([url]) => url.endsWith("/state")).at(-1)[1].body).archived, true);
+  } finally { app.close(); }
+});
+
+test("long availability messages retain a rightmost dot and titles have no arrow", async () => {
+  const app = await setup({ eventOverrides: { status: "NOT_OPEN", title: "Long Event Title" } });
+  try {
+    const card = app.document.querySelector(".result-card");
+    const status = card.querySelector(".card-top .status");
+    assert.equal(status.textContent, "Not open yet");
+    assert.equal(status.parentElement.lastElementChild, status);
+    const styles = readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+    assert.match(styles, /\.card-top \.status::after\s*\{[^}]*content:\s*""/);
+    assert.match(styles, /\.card-top \.status\s*\{[^}]*text-align:\s*right/);
+    assert.match(styles, /\.card-top \.status::before\s*\{\s*display:\s*none/);
+    assert.doesNotMatch(styles, /\.card-title a:after/);
+    assert.match(styles, /\.card-title a:hover/);
+  } finally { app.close(); }
 });

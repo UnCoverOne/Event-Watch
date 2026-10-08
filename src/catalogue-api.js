@@ -112,6 +112,7 @@ async function knownScopeLocations(env, scope) {
     const key = placeKey(row.city);
     if (key && !cities.has(key)) cities.set(key, row.city);
     if (
+      row.latitude != null && row.longitude != null &&
       Number.isFinite(Number(row.latitude)) &&
       Number.isFinite(Number(row.longitude))
     )
@@ -192,7 +193,7 @@ async function reconcileStoreDuplicates(env, scope) {
          FROM lgs_stores e
          WHERE e.country IN (${marks})
          ORDER BY e.title COLLATE NOCASE, e.id
-         LIMIT 500`,
+         LIMIT 75`,
       )
         .bind(...countries)
         .all()
@@ -500,7 +501,7 @@ async function refreshUvsRegion(env, scope) {
   // are much cheaper than writing hundreds of unrelated global records.
   for (const store of stores) {
     try {
-      const events = await catalogueStoreEvents(env, store, { refresh: true });
+      const events = await catalogueStoreEvents(env, store, { refresh: true, maxPages: 1, resultLimit: 150 });
       refreshedStores++;
       visibleEvents += events.filter(
         (event) =>
@@ -537,6 +538,14 @@ export async function handleCatalogueApi(request, env) {
     }
   }
   if (method === "POST" && path === "/api/catalogue/refresh") {
+    const scope = await browseScope(
+      env,
+      await currentUser(request, env),
+      url.searchParams,
+    );
+    if (!scope?.sources.length)
+      return json({ refreshed: [], setup_required: true });
+
     // Every manual refresh shares one D1-backed global 30-minute cooldown.
     // This prevents anonymous scope/city variation from bypassing the budget.
     const now = nowIso();
@@ -546,13 +555,6 @@ export async function handleCatalogueApi(request, env) {
     ).bind(nextAllowed, now).run();
     if (!lease.meta?.changes)
       return json({ refreshed: [], rate_limited: true, retry_after_seconds: 1800 });
-    const scope = await browseScope(
-      env,
-      await currentUser(request, env),
-      url.searchParams,
-    );
-    if (!scope?.sources.length)
-      return json({ refreshed: [], setup_required: true });
 
     const refreshed = [];
 

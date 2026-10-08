@@ -441,8 +441,8 @@ test("event card highlights update immediately when Watch or Archive is toggled"
 
 test("state border and fade rules are scoped to event cards", () => {
   const styles = readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
-  assert.match(styles, /\\.result-card\\.event-card--joined[^}]*border-color:\\s*var\\(--event-joined-border\\)/);
-  assert.match(styles, /\\.result-card\\.event-card--watching[^}]*border-color:\\s*var\\(--event-watching-border\\)/);
-  assert.match(styles, /\\.result-card\\.event-card--archived[^}]*background:/);
-  assert.match(styles, /\\.result-card\\.event-card--archived \\.card-body\\s*\\{[^}]*opacity:/);
+  assert.match(styles, /\.result-card\.event-card--joined[^}]*border-color:\s*var\(--event-joined-border\)/);
+  assert.match(styles, /\.result-card\.event-card--watching[^}]*border-color:\s*var\(--event-watching-border\)/);
+  assert.match(styles, /\.result-card\.event-card--archived[^}]*background:/);
+  assert.match(styles, /\.result-card\.event-card--archived \.card-body\s*\{[^}]*opacity:/);
 });

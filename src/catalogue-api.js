@@ -501,7 +501,10 @@ async function refreshUvsPageRegion(env, scope, source) {
     for (const record of records) {
       inspected++;
       if (!matchesRefreshScope(record, scope)) continue;
-      await saveRecord(env, source === "uvs-events" ? "event" : "store", record, at);
+      // Do not implicitly save an embedded store from another location.
+      const scopedRecord = source === "uvs-events" && record.store &&
+        !matchesRefreshScope(record.store, scope) ? { ...record, store: null } : record;
+      await saveRecord(env, source === "uvs-events" ? "event" : "store", scopedRecord, at);
       imported++;
     }
     pages++;
@@ -555,7 +558,9 @@ async function refreshUvsRegion(env, scope) {
       const snapshot = await fetchUvsStoreEvents(store, { maxPages: 1 });
       for (const event of snapshot.records) {
         if (!matchesRefreshScope(event, scope)) continue;
-        const id = await saveRecord(env, "event", event);
+        const scopedEvent = event.store && !matchesRefreshScope(event.store, scope)
+          ? { ...event, store: null } : event;
+        const id = await saveRecord(env, "event", scopedEvent);
         await env.DB.prepare(
           "UPDATE events SET store_id = ? WHERE id = ? AND store_id IS NOT ?"
         ).bind(store.id, id, store.id).run();

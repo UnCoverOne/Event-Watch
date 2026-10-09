@@ -17,6 +17,7 @@ import {
 import { fetchPlayStoreEvents, fetchSourcePage, fetchUvsStoreEvents, playEvent, playQuery } from "./sources.js";
 import { normalizeCheckInterval } from "./schedule.js";
 import { CONNECTORS, getPreferences, savePreferences, browseScope, scopeConditions } from './browse-preferences.js';
+import { catalogueRevision, catalogueCacheKey, withPublicCache } from "./catalogue-cache.js";
 
 const KINDS = {
   event: ["events", "subscriptions", "event_id"],
@@ -785,8 +786,10 @@ export async function handleCatalogueApi(request, env) {
       throw new HttpError(401, "Sign in to sync and view your saved items.");
     const where = [],
       args = [user?.id || ""];
+    let publicScope = null;
     if (view === 'browse') {
       const scope = await browseScope(env, user, p);
+      publicScope = scope;
       if (!scope?.sources.length)
         return json({ items: [], total: 0, page: 1, pages: 0, setup_required: true });
       const constraints = scopeConditions(scope, kind);
@@ -918,28 +921,78 @@ export async function handleCatalogueApi(request, env) {
     );
     const limit = 24,
       clause = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    const sourcesField = `(SELECT GROUP_CONCAT(DISTINCT cs.source)
+      FROM catalogue_sources cs WHERE cs.entity_id = e.id AND cs.kind = '${kind}') AS sources`;
+
+    if (view === "browse") {
+      // Never store subscription state in the public cache. A cache hit avoids
+      // the full catalogue COUNT and page scan; only up to 24 personal flags
+      // are looked up via the (user_id,item_id) subscription index.
+      const cache = globalThis.caches?.default;
+      const revision = cache ? await catalogueRevision(env) : null;
+      const key = cache ? catalogueCacheKey("browse-v2", kind, publicScope, p, revision) : null;
+      const publicArgs = args.slice(1);
+      const publicFrom = `FROM ${table} e ${clause}`;
+      const listing = await withPublicCache(cache, key, 120, async () => {
+        const count = await env.DB.prepare(`SELECT COUNT(*) AS total ${publicFrom}`)
+          .bind(...publicArgs).first();
+        const rows = await env.DB.prepare(
+          `SELECT e.*, ${sourcesField} ${publicFrom} ORDER BY ${sort}, e.id LIMIT ? OFFSET ?`
+        ).bind(...publicArgs, limit, (page - 1) * limit).all();
+        return {
+          items: rows.results || [], total: count.total, page,
+          pages: Math.ceil(count.total / limit),
+        };
+      });
+      const publicItems = listing.items || [];
+      if (!user || !publicItems.length) {
+        return json({
+          ...listing,
+          items: publicItems.map(item => ({
+            ...item, subscription_id: null, bookmarked: 0, watching: 0,
+            archived: 0, active: 0, joined: 0, check_interval_minutes: null,
+            notify_open: null, notify_slots: null,
+          })),
+        });
+      }
+      const ids = publicItems.map(item => item.id);
+      const placeholders = ids.map(() => "?").join(",");
+      const stateRows = (await env.DB.prepare(
+        `SELECT * FROM ${subs} WHERE user_id = ? AND ${fk} IN (${placeholders})`
+      ).bind(user.id, ...ids).all()).results || [];
+      const stateById = new Map(stateRows.map(row => [row[fk], row]));
+      return json({
+        ...listing,
+        items: publicItems.map(item => {
+          const state = stateById.get(item.id);
+          return {
+            ...item,
+            subscription_id: state?.id || null,
+            bookmarked: state?.bookmarked || 0,
+            watching: state?.watching || 0,
+            archived: state?.archived || 0,
+            active: state?.active || 0,
+            check_interval_minutes: state?.check_interval_minutes ?? null,
+            joined: kind === "event" ? (state?.joined || 0) : undefined,
+            notify_open: kind === "event" ? (state?.notify_open ?? null) : undefined,
+            notify_slots: kind === "event" ? (state?.notify_slots ?? null) : undefined,
+          };
+        }),
+      });
+    }
+
+    // Collection depends on personal state, so it must never use the shared cache.
     const from = `FROM ${table} e LEFT JOIN ${subs} s ON s.${fk} = e.id AND s.user_id = ? ${clause}`;
     const count = await env.DB.prepare(`SELECT COUNT(*) AS total ${from}`)
-      .bind(...args)
-      .first();
+      .bind(...args).first();
     const fields = `s.id AS subscription_id, COALESCE(s.bookmarked, 0) AS bookmarked, COALESCE(s.watching, 0) AS watching,
       COALESCE(s.archived, 0) AS archived, COALESCE(s.active, 0) AS active, s.check_interval_minutes,
       ${kind === "event" ? "COALESCE(s.joined, 0) AS joined, s.notify_open, s.notify_slots," : ""}
-      (SELECT GROUP_CONCAT(DISTINCT cs.source) FROM catalogue_sources cs WHERE cs.entity_id = e.id AND cs.kind = '${kind}') AS sources`;
-    const items =
-      (
-        await env.DB.prepare(
-          `SELECT e.*, ${fields} ${from} ORDER BY ${sort}, e.id LIMIT ? OFFSET ?`,
-        )
-          .bind(...args, limit, (page - 1) * limit)
-          .all()
-      ).results || [];
-    return json({
-      items,
-      total: count.total,
-      page,
-      pages: Math.ceil(count.total / limit),
-    });
+      ${sourcesField}`;
+    const items = (await env.DB.prepare(
+      `SELECT e.*, ${fields} ${from} ORDER BY ${sort}, e.id LIMIT ? OFFSET ?`
+    ).bind(...args, limit, (page - 1) * limit).all()).results || [];
+    return json({ items, total: count.total, page, pages: Math.ceil(count.total / limit) });
   }
   if (method === "GET" && path === "/api/catalogue/filters") {
     const p = url.searchParams;
@@ -953,10 +1006,9 @@ export async function handleCatalogueApi(request, env) {
     // Browse facets are identical for all users with the same configured scope.
     // Cache only public scope-derived metadata, never private collection facets.
     const facetCache = view === "browse" ? globalThis.caches?.default : null;
-    const facetKey = facetCache ? new Request(
-      "https://event-watch.internal/facets?scope=" +
-        encodeURIComponent(JSON.stringify([kind, [...scope.sources].sort(), scope.country, scope.city]))
-    ) : null;
+    const facetKey = facetCache
+      ? catalogueCacheKey("facets-v2", kind, scope, new URLSearchParams(), await catalogueRevision(env))
+      : null;
     if (facetKey) {
       try {
         const cached = await facetCache.match(facetKey);
@@ -993,7 +1045,7 @@ export async function handleCatalogueApi(request, env) {
     if (facetKey) {
       try {
         await facetCache.put(facetKey, Response.json(results, {
-          headers: { "cache-control": "public, max-age=3600" },
+          headers: { "cache-control": "public, max-age=21600" },
         }));
       } catch (error) { console.warn("Facet cache store failed", error.message); }
     }

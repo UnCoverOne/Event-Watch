@@ -735,7 +735,7 @@ async function loadSourceStatus() {
     const data = await metadata(`/api/catalogue/sources?${scopeParams()}`);
     if (prefs !== state.preferences || state.editingSources || state.view !== "browse") return;
     $("sourceStatus").innerHTML =
-      `${data.sources.some(s => !s.last_completed_at) ? "<div>Catalogue indexing is in progress. More events and stores will appear as sources are imported.</div>" : ""}<details><summary>Sources & freshness</summary>${data.sources
+      `<div>Catalogue discovery runs only when you press Refresh for your selected region.</div><details><summary>Sources & freshness</summary>${data.sources
         .map((s) => {
           const label =
             s.source === "play"
@@ -743,13 +743,9 @@ async function loadSourceStatus() {
               : s.source === "uvs-events"
                 ? "UVS events"
                 : "UVS stores";
-          const status = s.last_error
-            ? `Update unavailable: ${esc(s.last_error)} · showing saved data`
-            : s.last_completed_at
-              ? `Updated ${esc(dateTime(s.last_checked_at))}`
-              : s.last_checked_at
-                ? `Indexing in progress · last batch ${esc(dateTime(s.last_checked_at))}`
-                : "Initial indexing in progress; results are not yet complete";
+          const status = s.last_checked_at
+            ? `Manually refreshed ${esc(dateTime(s.last_checked_at))}${s.last_completed_at ? "" : " · partial coverage"}`
+            : "Not manually refreshed for this region";
           return `<div>${esc(label)} · ${status}</div>`;
         })
         .join(
@@ -818,7 +814,7 @@ async function loadResults() {
           ? `No ${state.kind === "event" ? "events" : "stores"} found`
           : "Nothing here yet.",
         state.view === "browse"
-          ? "Try another location or fewer filters. New source listings are indexed in the background."
+          ? "Try another location or fewer filters, or press Refresh to discover new events in this region."
           : "Save items from Browse to build your own collection.",
         "Clear filters",
       );
@@ -1215,7 +1211,7 @@ async function api(url, options = {}) {
 if ("serviceWorker" in navigator)
   window.addEventListener("load", () =>
     navigator.serviceWorker
-      .register("/sw.js?build=2026-10-08-d1-budget-v1", {
+      .register("/sw.js?build=2026-10-09-manual-regional-v1", {
         scope: "/",
         updateViaCache: "none",
       })

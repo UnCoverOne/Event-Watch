@@ -990,6 +990,8 @@ test("store watchers baseline existing listings, notify only new events, and arc
   records = [raw(), raw(101)];
   result = await checkOneLgs(env, item, { subscriptionId: state.id });
   assert.equal(result.alertsQueued, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM events").get().n, 0,
+    "Watching a store must not silently import its events into the shared catalogue");
   await request(`/api/catalogue/store/${id}/state`, "PATCH", {
     archived: true,
   });
@@ -1313,4 +1315,126 @@ test("browse filter facets reuse a scoped shared response cache", async () => {
     globalThis.caches = oldCaches;
     db.close();
   }
+});
+
+test("manual UVS Refresh imports only events and stores in the selected country/city", async (t) => {
+  const { env, db, request } = await fixture();
+  db.prepare("UPDATE user_browse_preferences SET config = ? WHERE user_id = 'u'")
+    .run(JSON.stringify({ sources: ["uvs"], country: "GB", city: "London" }));
+  const london = raw(701);
+  const foreign = { ...raw(702),
+    store: { ...raw().store, id: 21, name: "Foreign Store", city: "New York", country: "US", full_address: "NY, USA" },
+    full_address: "New York, USA",
+  };
+  const calls = [];
+  t.mock.method(globalThis, "fetch", async url => {
+    const parsed = new URL(url);
+    calls.push(parsed.pathname + parsed.search);
+    if (parsed.pathname.includes("game-stores"))
+      return Response.json({ results: [
+        raw().store,
+        foreign.store,
+      ], next_page_number: null });
+    if (parsed.searchParams.has("store_id")) {
+      assert.equal(parsed.searchParams.get("store_id"), "20");
+      return Response.json({ results: [london], next_page_number: null });
+    }
+    return Response.json({ results: [london, foreign], next_page_number: null });
+  });
+  try {
+    const refreshed = await request("/api/catalogue/refresh", "POST");
+    assert.deepEqual(refreshed.refreshed.slice(0, 2).map(x => x.source), ["uvs-stores", "uvs-events"]);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM events WHERE country = 'US'").get().n, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM lgs_stores WHERE country = 'US'").get().n, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM events WHERE country = 'GB'").get().n, 1);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM lgs_stores WHERE country = 'GB'").get().n, 1);
+    assert.equal(calls.length, 3, "Only two directory pages plus a selected store listing are read");
+    const cursor = db.prepare(
+      "SELECT next_page, last_completed_at FROM catalogue_region_cursors WHERE source = 'uvs-events' AND country = 'GB' AND city = 'london'"
+    ).get();
+    assert.equal(cursor.next_page, 1);
+    assert.ok(cursor.last_completed_at);
+    assert.equal(db.prepare("SELECT cursor FROM catalogue_sync WHERE source = 'uvs-events'").get().cursor, null,
+      "Manual regional refresh must not advance the old global cursor");
+  } finally { db.close(); }
+});
+
+test("manual UVS Refresh advances a region-only cursor across bounded pages", async (t) => {
+  const { db, request } = await fixture();
+  db.prepare("UPDATE user_browse_preferences SET config = ? WHERE user_id = 'u'")
+    .run(JSON.stringify({ sources: ["uvs"], country: "GB", city: "Manchester" }));
+  const pages = [];
+  t.mock.method(globalThis, "fetch", async url => {
+    const parsed = new URL(url);
+    if (parsed.searchParams.has("store_id"))
+      throw new Error("No matching store should be queried");
+    pages.push([parsed.pathname, parsed.searchParams.get("page")]);
+    const n = Number(parsed.searchParams.get("page"));
+    return Response.json({ results: [], next_page_number: n < 5 ? n + 1 : null });
+  });
+  try {
+    const first = await request("/api/catalogue/refresh", "POST");
+    assert.equal(first.refreshed[0].complete, false);
+    assert.equal(first.refreshed[1].complete, false);
+    assert.deepEqual(pages.map(p => p[1]), ["1", "2", "1", "2"]);
+    assert.equal(db.prepare(
+      "SELECT next_page FROM catalogue_region_cursors WHERE source = 'uvs-events' AND country = 'GB' AND city = 'manchester'"
+    ).get().next_page, 3);
+    db.prepare("UPDATE catalogue_manual_refresh SET next_allowed_at = '1970-01-01'").run();
+    await request("/api/catalogue/refresh", "POST");
+    assert.deepEqual(pages.map(p => p[1]), ["1", "2", "1", "2", "3", "4", "3", "4"]);
+    assert.equal(db.prepare(
+      "SELECT next_page FROM catalogue_region_cursors WHERE source = 'uvs-events' AND country = 'GB' AND city = 'manchester'"
+    ).get().next_page, 5);
+  } finally { db.close(); }
+});
+
+test("catalogue details and store event listings are read-only even when stale", async (t) => {
+  const { env, db, request } = await fixture();
+  const eventId = await saveRecord(env, "event", uvsEvent(raw(803)));
+  const store = db.prepare("SELECT id, last_checked_at FROM lgs_stores WHERE source_id = '20'").get();
+  assert.ok(store);
+  db.prepare("UPDATE events SET last_checked_at = ? WHERE id = ?").run("2020-01-01", eventId);
+  db.prepare("UPDATE lgs_stores SET last_checked_at = ? WHERE id = ?").run("2020-01-01", store.id);
+  let fetches = 0;
+  t.mock.method(globalThis, "fetch", async () => {
+    fetches++;
+    throw new Error("GET must never contact the upstream sources");
+  });
+  try {
+    const before = db.prepare("SELECT total_changes() AS n").get().n;
+    const event = await request("/api/catalogue/event/" + eventId);
+    const storeDetail = await request("/api/catalogue/store/" + store.id);
+    const listing = await request("/api/catalogue/store/" + store.id + "/events");
+    assert.equal(event.item.last_checked_at, "2020-01-01");
+    assert.equal(storeDetail.item.last_checked_at, "2020-01-01");
+    assert.equal(listing.events.length, 1);
+    assert.equal(fetches, 0);
+    assert.equal(db.prepare("SELECT total_changes() AS n").get().n, before);
+  } finally { db.close(); }
+});
+
+test("manual Play refresh with Worldwide and a city does not import other cities", async (t) => {
+  const { db, request } = await fixture();
+  db.prepare("UPDATE user_browse_preferences SET config = ? WHERE user_id = 'u'")
+    .run(JSON.stringify({ sources: ["play"], country: "*", city: "București" }));
+  t.mock.method(globalThis, "fetch", async () => Response.json({data:{
+    competeTournamentSearch:{
+      edges: ["București", "Cluj-Napoca"].map((city, i) => ({node:{
+        tournament:{ id:"city-" + i, name:"Event " + i, startsAt:"2099-10-16T16:00:00Z", registrantCounts:[], config:{} },
+        organizer:{ id:"org-" + i, name:"Venue " + i, physicalAddress:{
+          formattedAddress:"Street 1, " + city + ", Romania", city,
+          latitude:i?46.7:44.4, longitude:i?23.6:26.1,
+        } },
+      }})),
+      pageInfo:{hasNextPage:false,endCursor:null},
+    }
+  }}));
+  try {
+    const result = await request("/api/catalogue/refresh", "POST");
+    assert.equal(result.refreshed[0].source, "play");
+    assert.equal(result.refreshed[0].count, 1);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM events WHERE city = 'București'").get().n, 1);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM events WHERE city = 'Cluj-Napoca'").get().n, 0);
+  } finally { db.close(); }
 });

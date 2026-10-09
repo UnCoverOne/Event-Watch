@@ -1,10 +1,9 @@
-import { catalogueStoreEvents } from './catalogue.js';
 import { sendPush, alertNotification } from './push.js';
 import { fetchEvent, fetchLgsStore } from './adapters.js';
 import { nowIso, uuid } from './utils.js';
 import { sendWatchDigestEmail } from './email.js';
 import { nextCheckAt } from './schedule.js';
-import { fetchPlayStoreEvents } from './sources.js';
+import { fetchPlayStoreEvents, fetchUvsStoreEvents } from './sources.js';
 
 export async function runChecks(env) {
   const dueAt = nowIso();
@@ -184,18 +183,9 @@ export async function checkOneLgs(env, store, options = {}) {
     let snapshot;
     if (store.source === 'play') {
       snapshot = await fetchPlayStoreEvents(store);
-    } else if (store.source_id) {
-      const events = await catalogueStoreEvents(env, store, { refresh: store.source === 'uvs' });
-      snapshot = {
-        title: store.title,
-        events: events.map((e) => ({
-          eventKey: store.source === 'uvs'
-            ? e.event_key.replace(/^riftbound:/, '')
-            : e.event_key,
-          eventUrl: e.event_url,
-          title: e.title,
-        })),
-      };
+    } else if (store.source === 'uvs' && store.source_id) {
+      // Only monitoring state is updated: no catalogue event insert/update.
+      snapshot = await fetchUvsStoreEvents(store);
     } else snapshot = await fetchLgsStore(store);
     const storeTitle = snapshot.title || store.title || 'Watched LGS';
 

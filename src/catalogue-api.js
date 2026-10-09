@@ -657,7 +657,7 @@ export async function handleCatalogueApi(request, env) {
           ON CONFLICT(source, country, city) DO UPDATE SET
             last_checked_at = excluded.last_checked_at,
             last_completed_at = COALESCE(excluded.last_completed_at, catalogue_region_cursors.last_completed_at)`
-      ).bind(scope.country, placeKey(scope.city), at, playResult.complete === true || !playResult.next ? at : null).run();
+      ).bind(scope.country, placeKey(scope.city), at, (typeof playResult.complete === "boolean" ? playResult.complete : !playResult.next) ? at : null).run();
     }
 
     if (scope.sources.includes("uvs") && scope.sources.includes("play")) {

@@ -20,13 +20,12 @@ async function runEventChecks(env, dueAt) {
   const limit = clampInt(env.CHECK_BATCH_SIZE, 50, 1, 200);
   const concurrency = clampInt(env.CHECK_CONCURRENCY, 5, 1, 10);
   const result = await env.DB.prepare(`
-    SELECT DISTINCT e.*
-    FROM events e
-    JOIN subscriptions s ON s.event_id = e.id
-    WHERE s.active = 1
-      AND (s.next_check_at IS NULL OR s.next_check_at <= ?)
-    ORDER BY COALESCE(e.last_checked_at, '1970-01-01T00:00:00.000Z') ASC
-    LIMIT ?
+    SELECT e.* FROM events e
+    WHERE e.id IN (
+      SELECT s.event_id FROM subscriptions s
+      WHERE s.active = 1 AND (s.next_check_at IS NULL OR s.next_check_at <= ?)
+      ORDER BY s.next_check_at LIMIT ?
+    )
   `).bind(dueAt, limit).all();
 
   return runInChunks(result.results || [], concurrency, (event) =>
@@ -38,13 +37,12 @@ async function runLgsChecks(env, dueAt) {
   const limit = clampInt(env.CHECK_BATCH_SIZE, 50, 1, 200);
   const concurrency = clampInt(env.CHECK_CONCURRENCY, 5, 1, 10);
   const result = await env.DB.prepare(`
-    SELECT DISTINCT s.*
-    FROM lgs_stores s
-    JOIN lgs_subscriptions sub ON sub.store_id = s.id
-    WHERE sub.active = 1
-      AND (sub.next_check_at IS NULL OR sub.next_check_at <= ?)
-    ORDER BY COALESCE(s.last_checked_at, '1970-01-01T00:00:00.000Z') ASC
-    LIMIT ?
+    SELECT st.* FROM lgs_stores st
+    WHERE st.id IN (
+      SELECT sub.store_id FROM lgs_subscriptions sub
+      WHERE sub.active = 1 AND (sub.next_check_at IS NULL OR sub.next_check_at <= ?)
+      ORDER BY sub.next_check_at LIMIT ?
+    )
   `).bind(dueAt, limit).all();
 
   return runInChunks(result.results || [], concurrency, (store) =>

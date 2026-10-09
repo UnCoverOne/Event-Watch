@@ -646,6 +646,20 @@ export async function handleCatalogueApi(request, env) {
       }
     }
 
+    // Show freshness for this exact selected region, not an old global cursor.
+    const playResult = refreshed.find(row => row.source === "play" && !row.error && !row.skipped);
+    if (playResult) {
+      const at = nowIso();
+      await env.DB.prepare(
+        `INSERT INTO catalogue_region_cursors
+          (source, country, city, next_page, last_checked_at, last_completed_at)
+          VALUES ('play', ?, ?, 1, ?, ?)
+          ON CONFLICT(source, country, city) DO UPDATE SET
+            last_checked_at = excluded.last_checked_at,
+            last_completed_at = COALESCE(excluded.last_completed_at, catalogue_region_cursors.last_completed_at)`
+      ).bind(scope.country, placeKey(scope.city), at, playResult.complete === true || !playResult.next ? at : null).run();
+    }
+
     if (scope.sources.includes("uvs") && scope.sources.includes("play")) {
       try {
         const stores = await reconcileStoreDuplicates(env, scope);
@@ -662,13 +676,22 @@ export async function handleCatalogueApi(request, env) {
   if (method === "GET" && path === "/api/catalogue/sources") {
     const scope = await browseScope(env, await currentUser(request, env), url.searchParams);
     if (!scope?.sources.length) return json({ sources: [] });
-    const sources =
-      (
-        await env.DB.prepare(
-          "SELECT source, cursor, last_checked_at, last_completed_at, last_error FROM catalogue_sync",
-        ).all()
-      ).results || [];
-    return json({ sources: sources.filter(s => scope.sources.includes(s.source === 'play' ? 'play' : 'uvs')) });
+    const rows = (
+      await env.DB.prepare(
+        "SELECT source, next_page, last_checked_at, last_completed_at FROM catalogue_region_cursors WHERE country = ? AND city = ?"
+      ).bind(scope.country, placeKey(scope.city)).all()
+    ).results || [];
+    const progress = new Map(rows.map(row => [row.source, row]));
+    const selected = [
+      ...(scope.sources.includes("uvs") ? ["uvs-events", "uvs-stores"] : []),
+      ...(scope.sources.includes("play") ? ["play"] : []),
+    ];
+    return json({ sources: selected.map(source => ({
+      source, last_checked_at: progress.get(source)?.last_checked_at || null,
+      last_completed_at: progress.get(source)?.last_completed_at || null,
+      cursor: progress.get(source)?.next_page || null,
+      last_error: null,
+    })) });
   }
   if (method === "POST" && path === "/api/catalogue/resolve") {
     await requireUser(request, env);

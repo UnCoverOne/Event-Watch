@@ -34,7 +34,7 @@ test("catalogue browsing activity uses cache rather than D1", async () => {
 
 test("scheduled Worker checks watches but never imports the catalogue", () => {
   const index = readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
-  assert.match(index, /await runChecks\(env\)/);
+  assert.match(index, /await runChecks\(\{ \.\.\.env, DB: meter\.db \}\)/);
   assert.doesNotMatch(index, /syncCatalogue|shouldRunCatalogueSync/);
   const config = readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8");
   assert.match(config, /"crons":\s*\["\*\/5 \* \* \* \*"\]/);

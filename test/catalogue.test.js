@@ -1438,3 +1438,61 @@ test("manual Play refresh with Worldwide and a city does not import other cities
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM events WHERE city = 'Cluj-Napoca'").get().n, 0);
   } finally { db.close(); }
 });
+
+test("Browse caches public rows and counts while keeping personal state private and fresh", async () => {
+  const { env, db, request } = await fixture();
+  const id = await saveRecord(env, "event", uvsEvent(raw(9921)));
+  class MemoryCache {
+    rows = new Map();
+    async match(key) { return this.rows.get(key.url)?.clone(); }
+    async put(key, response) { this.rows.set(key.url, response.clone()); }
+  }
+  let publicCounts = 0;
+  const originalPrepare = env.DB.prepare;
+  env.DB.prepare = sql => {
+    if (sql.startsWith("SELECT COUNT(*) AS total FROM events e ")) publicCounts++;
+    return originalPrepare(sql);
+  };
+  const old = globalThis.caches;
+  const cache = new MemoryCache();
+  globalThis.caches = { default: cache };
+  try {
+    const first = await request("/api/catalogue/events");
+    assert.equal(first.total, 1);
+    assert.equal(first.items[0].bookmarked, 0);
+    assert.equal(publicCounts, 1);
+    const second = await request("/api/catalogue/events");
+    assert.equal(second.total, 1);
+    assert.equal(publicCounts, 1, "Repeated Browse queries must not scan the public catalogue again");
+    await request(`/api/catalogue/event/${id}/state`, "PATCH", { bookmarked: true, watching: true });
+    const signed = await request("/api/catalogue/events");
+    assert.equal(signed.items[0].bookmarked, 1, "Personal flags are fetched after public cache hits");
+    assert.equal(signed.items[0].watching, 1);
+    assert.equal(publicCounts, 1);
+    const guest = await request("/api/catalogue/events?sources=uvs,play&region=*", "GET", undefined, false);
+    assert.equal(guest.items[0].bookmarked, 0, "Public Browse must never leak signed-in state");
+    assert.equal(guest.items[0].watching, 0);
+    const prior = publicCounts;
+    db.prepare("UPDATE catalogue_manual_refresh SET next_allowed_at = '2099-01-01'").run();
+    await request("/api/catalogue/events");
+    assert.equal(publicCounts, prior + 1, "Manual Refresh revision must invalidate public results");
+  } finally { globalThis.caches = old; db.close(); }
+});
+
+test("due-watch and pending-alert indexes exist for cheaper scheduled scans", async () => {
+  const { db } = await fixture();
+  for (const [table, index] of [
+    ["subscriptions", "idx_subscriptions_due_event"],
+    ["lgs_subscriptions", "idx_lgs_subscriptions_due_store"],
+    ["alert_queue", "idx_alert_queue_unsent_created"],
+  ]) {
+    const indexes = db.prepare(`PRAGMA index_list(${table})`).all();
+    assert.ok(indexes.some(row => row.name === index), index);
+  }
+  const due = db.prepare(`EXPLAIN QUERY PLAN
+    SELECT event_id FROM subscriptions INDEXED BY idx_subscriptions_due_event
+    WHERE active = 1 AND (next_check_at IS NULL OR next_check_at <= ?)
+    ORDER BY next_check_at LIMIT 50`).all("2026-10-09");
+  assert.ok(due.some(row => String(row.detail).includes("COVERING INDEX")));
+  db.close();
+});

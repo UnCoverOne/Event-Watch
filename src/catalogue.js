@@ -562,49 +562,12 @@ export async function refreshCatalogueItem(env, kind, item) {
     .first();
 }
 
-export async function catalogueStoreEvents(
-  env,
-  store,
-  { refresh = false, maxPages = Infinity, resultLimit = null } = {},
-) {
-  if (refresh && store.source === "uvs" && store.source_id) {
-    // Get a complete live listing before advancing any watch baseline.
-    let page = 1;
-    for (;;) {
-      const query = new URLSearchParams({
-        game_slug: "riftbound",
-        store_id: store.source_id,
-        upcoming_only: "true",
-        page_size: "100",
-        page: String(page),
-      });
-      const data = await sourceJson(`${UVS_API}/events/?${query}`);
-      if (!Array.isArray(data.results))
-        throw new Error("Invalid store event listing.");
-      for (const r of data.results) {
-        if (String(r.store?.id) !== store.source_id)
-          throw new Error("Source returned events from a different store.");
-        const id = await saveRecord(env, "event", uvsEvent(r));
-        await env.DB.prepare(
-          "UPDATE events SET store_id = ? WHERE id = ? AND store_id IS NOT ?",
-        )
-          .bind(store.id, id, store.id)
-          .run();
-      }
-      const next = data.next_page_number;
-      if (next == null || page >= maxPages) break;
-      if (!Number.isSafeInteger(next) || next <= page || next > 100)
-        throw new Error("Incomplete store listing.");
-      page = next;
-    }
-  }
+// Store detail listings read only the indexed catalogue. Live UVS store
+// snapshots for watcher alerts are fetched separately in src/sources.js.
+export async function catalogueStoreEvents(env, store) {
   return (
-    (
-      await env.DB.prepare(
-        "SELECT * FROM events WHERE store_id = ? ORDER BY starts_at, id" + (resultLimit ? " LIMIT ?" : ""),
-      )
-        .bind(...(resultLimit ? [store.id, resultLimit] : [store.id]))
-        .all()
-    ).results || []
+    (await env.DB.prepare(
+      "SELECT * FROM events WHERE store_id = ? ORDER BY starts_at, id"
+    ).bind(store.id).all()).results || []
   );
 }

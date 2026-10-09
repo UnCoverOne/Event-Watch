@@ -14,7 +14,7 @@ import {
   saveRecord,
   syncCatalogue,
 } from "./catalogue.js";
-import { fetchPlayStoreEvents, playEvent, playQuery } from "./sources.js";
+import { fetchPlayStoreEvents, fetchSourcePage, fetchUvsStoreEvents, playEvent, playQuery } from "./sources.js";
 import { normalizeCheckInterval } from "./schedule.js";
 import { CONNECTORS, getPreferences, savePreferences, browseScope, scopeConditions } from './browse-preferences.js';
 
@@ -321,7 +321,7 @@ async function safeSyncCatalogue(env, options) {
 }
 
 async function refreshPlayRegion(env, scope, request) {
-  if (scope.country === "*") return null;
+  if (scope.country === "*" && !scope.city) return null;
 
   const knownLocations = await knownScopeLocations(env, scope);
   const cf = request.cf || {};
@@ -398,7 +398,7 @@ async function refreshPlayRegion(env, scope, request) {
         record = inferPlayScope(record, scope, knownLocations);
         if (!originalCountry && record.country) inferred++;
 
-        if (record.country !== scope.country) continue;
+        if (scope.country !== "*" && record.country !== scope.country) continue;
         if (!cityMatches(record.city, scope.city)) continue;
 
         await saveRecord(env, "event", record, at);
@@ -471,21 +471,77 @@ async function scopedUvsStores(env, scope) {
   );
 }
 
-async function refreshUvsRegion(env, scope) {
-  const refreshed = [];
+// Only explicit Refresh can import public catalogue entries, and only
+// records matching the user's currently selected location may be saved.
+// The upstream UVS directory has no verified country/city query contract:
+// scan a bounded page range and filter BEFORE any D1 catalogue write.
+function matchesRefreshScope(record, scope) {
+  return (scope.country === "*" || countryNames(scope.country).includes(record.country)) &&
+    cityMatches(record.city, scope.city);
+}
 
-  // Advance the shared catalogue a little, but do not hammer D1 with dozens
-  // of global pages in a single user request.
-  for (const source of ["uvs-stores", "uvs-stores", "uvs-events"]) {
-    const result = await safeSyncCatalogue(env, {
-      source,
-      force: true,
-      enabled: scope.sources,
-    });
-    refreshed.push(result);
-    if (result.error) break;
+async function refreshUvsPageRegion(env, scope, source) {
+  const city = placeKey(scope.city);
+  const region = scope.country;
+  const prior = await env.DB.prepare(
+    "SELECT next_page FROM catalogue_region_cursors WHERE source = ? AND country = ? AND city = ?"
+  ).bind(source, region, city).first();
+  let page = prior?.next_page || 1;
+  let imported = 0;
+  let inspected = 0;
+  let pages = 0;
+  let complete = false;
+  const at = nowIso();
+
+  // A region-specific cursor means the next manual Refresh makes progress,
+  // rather than repeatedly scanning the same unrelated global source page.
+  for (let i = 0; i < 2; i++) {
+    const batch = await fetchSourcePage(source, String(page));
+    const records = source === "uvs-events" ? batch.events : batch.stores;
+    for (const record of records) {
+      inspected++;
+      if (!matchesRefreshScope(record, scope)) continue;
+      // Do not implicitly save an embedded store from another location.
+      const scopedRecord = source === "uvs-events" && record.store &&
+        !matchesRefreshScope(record.store, scope) ? { ...record, store: null } : record;
+      await saveRecord(env, source === "uvs-events" ? "event" : "store", scopedRecord, at);
+      imported++;
+    }
+    pages++;
+    if (!batch.next) {
+      complete = true;
+      page = 1;
+      break;
+    }
+    page = Number(batch.next);
   }
 
+  await env.DB.prepare(
+    `INSERT INTO catalogue_region_cursors
+      (source, country, city, next_page, last_checked_at, last_completed_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(source, country, city) DO UPDATE SET
+        next_page = excluded.next_page,
+        last_checked_at = excluded.last_checked_at,
+        last_completed_at = COALESCE(excluded.last_completed_at, catalogue_region_cursors.last_completed_at)`
+  ).bind(source, region, city, page, at, complete ? at : null).run();
+  return { source, count: imported, scanned: inspected, pages, complete, regional: true };
+}
+
+async function refreshUvsRegion(env, scope) {
+  const refreshed = [];
+  // Manual source discovery scans at most two pages of each directory.
+  // All source records are checked against the selected country/city before writing.
+  for (const source of ["uvs-stores", "uvs-events"]) {
+    try {
+      refreshed.push(await refreshUvsPageRegion(env, scope, source));
+    } catch (error) {
+      refreshed.push({ source, error: error.message });
+    }
+  }
+
+  // Once a store in the selected region is known, read its authoritative
+  // one-page listing and import only matching event records.
   let stores = [];
   try {
     stores = await scopedUvsStores(env, scope);
@@ -497,19 +553,20 @@ async function refreshUvsRegion(env, scope) {
   let refreshedStores = 0;
   let visibleEvents = 0;
   const errors = [];
-
-  // Store event endpoints are the authoritative UVS listing for a store and
-  // are much cheaper than writing hundreds of unrelated global records.
   for (const store of stores) {
     try {
-      const events = await catalogueStoreEvents(env, store, { refresh: true, maxPages: 1, resultLimit: 150 });
+      const snapshot = await fetchUvsStoreEvents(store, { maxPages: 1 });
+      for (const event of snapshot.records) {
+        if (!matchesRefreshScope(event, scope)) continue;
+        const scopedEvent = event.store && !matchesRefreshScope(event.store, scope)
+          ? { ...event, store: null } : event;
+        const id = await saveRecord(env, "event", scopedEvent);
+        await env.DB.prepare(
+          "UPDATE events SET store_id = ? WHERE id = ? AND store_id IS NOT ?"
+        ).bind(store.id, id, store.id).run();
+        visibleEvents++;
+      }
       refreshedStores++;
-      visibleEvents += events.filter(
-        (event) =>
-          (scope.country === "*" ||
-            countryNames(scope.country).includes(event.country)) &&
-          cityMatches(event.city, scope.city),
-      ).length;
     } catch (error) {
       errors.push(`${store.title}: ${error.message}`);
     }
@@ -589,6 +646,20 @@ export async function handleCatalogueApi(request, env) {
       }
     }
 
+    // Show freshness for this exact selected region, not an old global cursor.
+    const playResult = refreshed.find(row => row.source === "play" && !row.error && !row.skipped);
+    if (playResult) {
+      const at = nowIso();
+      await env.DB.prepare(
+        `INSERT INTO catalogue_region_cursors
+          (source, country, city, next_page, last_checked_at, last_completed_at)
+          VALUES ('play', ?, ?, 1, ?, ?)
+          ON CONFLICT(source, country, city) DO UPDATE SET
+            last_checked_at = excluded.last_checked_at,
+            last_completed_at = COALESCE(excluded.last_completed_at, catalogue_region_cursors.last_completed_at)`
+      ).bind(scope.country, placeKey(scope.city), at, (typeof playResult.complete === "boolean" ? playResult.complete : !playResult.next) ? at : null).run();
+    }
+
     if (scope.sources.includes("uvs") && scope.sources.includes("play")) {
       try {
         const stores = await reconcileStoreDuplicates(env, scope);
@@ -605,13 +676,22 @@ export async function handleCatalogueApi(request, env) {
   if (method === "GET" && path === "/api/catalogue/sources") {
     const scope = await browseScope(env, await currentUser(request, env), url.searchParams);
     if (!scope?.sources.length) return json({ sources: [] });
-    const sources =
-      (
-        await env.DB.prepare(
-          "SELECT source, cursor, last_checked_at, last_completed_at, last_error FROM catalogue_sync",
-        ).all()
-      ).results || [];
-    return json({ sources: sources.filter(s => scope.sources.includes(s.source === 'play' ? 'play' : 'uvs')) });
+    const rows = (
+      await env.DB.prepare(
+        "SELECT source, next_page, last_checked_at, last_completed_at FROM catalogue_region_cursors WHERE country = ? AND city = ?"
+      ).bind(scope.country, placeKey(scope.city)).all()
+    ).results || [];
+    const progress = new Map(rows.map(row => [row.source, row]));
+    const selected = [
+      ...(scope.sources.includes("uvs") ? ["uvs-events", "uvs-stores"] : []),
+      ...(scope.sources.includes("play") ? ["play"] : []),
+    ];
+    return json({ sources: selected.map(source => ({
+      source, last_checked_at: progress.get(source)?.last_checked_at || null,
+      last_completed_at: progress.get(source)?.last_completed_at || null,
+      cursor: progress.get(source)?.next_page || null,
+      last_error: null,
+    })) });
   }
   if (method === "POST" && path === "/api/catalogue/resolve") {
     await requireUser(request, env);
@@ -931,7 +1011,6 @@ export async function handleCatalogueApi(request, env) {
   if (!item) throw new HttpError(404, "This item could not be found.");
   if (method === "GET" && !action) {
     const user = await currentUser(request, env);
-    item = await refreshCatalogueItem(env, kind, item);
     const state = user
       ? await env.DB.prepare(
           `SELECT * FROM ${subs} WHERE user_id = ? AND ${fk} = ?`,
@@ -950,39 +1029,12 @@ export async function handleCatalogueApi(request, env) {
     return json({ item, state, sources });
   }
   if (method === "GET" && kind === "store" && action === "events") {
-    let warning = null;
-    try {
-      if (item.source === "play") {
-        const snapshot = await fetchPlayStoreEvents(item);
-        return json({
-          events: snapshot.events.map((e) => ({
-            title: e.title,
-            event_url: e.eventUrl,
-            event_key: e.eventKey,
-          })),
-          warning: null,
-        });
-      }
-      if (item.source === "uvs" && item.source_id)
-        await catalogueStoreEvents(env, item, { refresh: true });
-      else if (item.adapter === "riftbound-store") {
-        const snapshot = await fetchLgsStore(item);
-        // Preserve older store watches while their public directory entry is being indexed.
-        return json({
-          events: snapshot.events.map((e) => ({
-            title: e.title,
-            event_url: e.eventUrl,
-            event_key: `riftbound:${e.eventKey}`,
-          })),
-          warning: null,
-        });
-      }
-    } catch {
-      warning =
-        "Could not refresh this store. Showing indexed events; the list may be incomplete.";
-    }
     const events = await catalogueStoreEvents(env, item);
-    return json({ events, warning });
+    return json({
+      events,
+      warning: events.length ? null :
+        "No manually indexed events for this store yet. Use Browse → Refresh for your selected region.",
+    });
   }
   if (method === "PATCH" && action === "state") {
     const user = await requireUser(request, env),

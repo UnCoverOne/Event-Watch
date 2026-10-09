@@ -238,6 +238,40 @@ export function playEvent(
     capacity,
   };
 }
+// Live UVS store discovery is read-only. Watch checks use this snapshot to
+// update personal notification baselines, never the shared catalogue.
+export async function fetchUvsStoreEvents(store, { maxPages = 100 } = {}) {
+  if (!store?.source_id) throw new Error("UVS store is missing its source ID.");
+  const events = [];
+  const records = [];
+  let page = 1;
+  for (;;) {
+    const query = new URLSearchParams({
+      game_slug: "riftbound",
+      store_id: String(store.source_id),
+      upcoming_only: "true",
+      page_size: "100",
+      page: String(page),
+    });
+    const data = await sourceJson(`${UVS_API}/events/?${query}`);
+    if (!Array.isArray(data.results)) throw new Error("Invalid UVS store event listing.");
+    for (const raw of data.results) {
+      if (String(raw.store?.id) !== String(store.source_id))
+        throw new Error("Source returned events from another UVS store.");
+      const event = uvsEvent(raw);
+      records.push(event);
+      events.push({ eventKey: event.source_id, eventUrl: event.url, title: event.title });
+    }
+    const next = data.next_page_number;
+    if (next == null) return { title: store.title, events, records, complete: true };
+    if (!Number.isSafeInteger(next) || next <= page || next > 100)
+      throw new Error("Incomplete UVS store event pagination.");
+    if (page >= maxPages)
+      return { title: store.title, events, records, complete: false };
+    page = next;
+  }
+}
+
 export async function fetchPlayStoreEvents(
   store,
   { distanceMeters = 1_000_000, maxPages = 20 } = {},

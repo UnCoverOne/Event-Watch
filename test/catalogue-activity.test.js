@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { shouldRunCatalogueSync } from "../src/index.js";
 import { readFileSync } from "node:fs";
 import {
   catalogueBrowseActive,
@@ -33,11 +32,10 @@ test("catalogue browsing activity uses cache rather than D1", async () => {
   );
 });
 
-test("catalogue refresh schedule is fixed and independent of visitor activity", () => {
-  assert.equal(shouldRunCatalogueSync(Date.parse("2026-10-07T12:00:00Z")), true);
-  assert.equal(shouldRunCatalogueSync(Date.parse("2026-10-07T12:30:00Z")), true);
-  assert.equal(shouldRunCatalogueSync(Date.parse("2026-10-07T12:05:00Z")), false);
-  assert.equal(shouldRunCatalogueSync(Date.parse("2026-10-07T12:55:00Z")), false);
+test("scheduled Worker checks watches but never imports the catalogue", () => {
+  const index = readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
+  assert.match(index, /await runChecks\(env\)/);
+  assert.doesNotMatch(index, /syncCatalogue|shouldRunCatalogueSync/);
   const config = readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8");
   assert.match(config, /"crons":\s*\["\*\/5 \* \* \* \*"\]/);
 });

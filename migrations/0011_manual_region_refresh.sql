@@ -1,6 +1,6 @@
 -- Refreshes progress through UVS pages per selected region, never in the background.
 CREATE TABLE catalogue_region_cursors (
-  source TEXT NOT NULL CHECK(source IN ('uvs-events', 'uvs-stores')),
+  source TEXT NOT NULL CHECK(source IN ('uvs-events', 'uvs-stores', 'play')),
   country TEXT NOT NULL,
   city TEXT NOT NULL DEFAULT '',
   next_page INTEGER NOT NULL DEFAULT 1,
